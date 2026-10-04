@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
-import { api } from './api'
+import { api, ApiError } from './api'
 import type { RoomState, UserView } from './types'
 import AdminView from './components/AdminView.vue'
 import AuthPanel from './components/AuthPanel.vue'
@@ -34,7 +34,11 @@ async function restoreUrl() {
   const roomId = params.get('room')
   if (roomId) {
     try { room.value = await api<RoomState>(`/api/rooms/${roomId}`); return }
-    catch { room.value = null; page.value = 'games'; writeUrl('games', undefined, true); return }
+    catch (cause) {
+      room.value = null; page.value = 'games'
+      if (cause instanceof ApiError && cause.status < 500 && cause.status !== 401) writeUrl('games', undefined, true)
+      return
+    }
   }
   room.value = null
   page.value = requestedPage()

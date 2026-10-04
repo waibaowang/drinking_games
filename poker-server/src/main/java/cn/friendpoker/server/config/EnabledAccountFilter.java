@@ -1,6 +1,7 @@
 package cn.friendpoker.server.config;
 
 import cn.friendpoker.server.user.UserAccountRepository;
+import cn.friendpoker.server.user.AccountPrincipal;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -25,9 +26,12 @@ public class EnabledAccountFilter extends OncePerRequestFilter {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication != null && authentication.isAuthenticated()
                 && !"anonymousUser".equals(authentication.getPrincipal())) {
-            boolean enabled = users.findByUsernameIgnoreCase(authentication.getName())
-                    .map(account -> account.isEnabled()).orElse(false);
-            if (!enabled) {
+            boolean valid = users.findByUsernameIgnoreCase(authentication.getName())
+                    .map(account -> account.isEnabled()
+                            && (!(authentication.getPrincipal() instanceof AccountPrincipal principal)
+                            || principal.authVersion() == account.getAuthVersion()))
+                    .orElse(false);
+            if (!valid) {
                 new SecurityContextLogoutHandler().logout(request, response, authentication);
                 response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "账号已禁用");
                 return;

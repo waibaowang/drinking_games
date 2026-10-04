@@ -68,7 +68,7 @@ sh scripts/verify.sh
 sh scripts/verify-postgres.sh
 ```
 
-该脚本会使用临时容器分别验证 PostgreSQL 全新库和 V1 升级库，完成后自动清理。
+该脚本会使用临时容器分别验证 PostgreSQL 全新库和 V1 升级到当前最新迁移版本，完成后自动清理。
 
 ## 上线
 

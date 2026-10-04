@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Push-Location $root
 try {
-    & mvn -q -pl poker-server -am package -DskipTests
+    & mvn -q -pl poker-server -am install -DskipTests
     if ($LASTEXITCODE -ne 0) { throw '编译失败' }
     & mvn -q -pl poker-server dependency:build-classpath '-Dmdep.outputFile=target/runtime-classpath.txt'
     if ($LASTEXITCODE -ne 0) { throw '无法生成运行时类路径' }

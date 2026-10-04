@@ -232,12 +232,14 @@ button:not(:disabled):hover { transform: translateY(-1px); filter: brightness(1.
   .playing-card, .card-slot { width: 43px; }
   .table-center { top: 46%; }
   .action-dock { min-height: 110px; padding: 10px; align-items: stretch; flex-direction: column; gap: 7px; }
+  .action-dock { position: sticky; bottom: 8px; z-index: 8; }
   .action-buttons { justify-content: center; flex-wrap: wrap; }
-  .wager-control { order: 2; width: 100%; }
-  .wager-presets { width: 100%; }
+  .wager-control { order: 2; width: 100%; flex-wrap: wrap; }
+  .wager-presets { flex: 1 0 100%; width: 100%; }
   .wager-presets button { flex: 1; }
   .wager-control input[type='range'] { flex: 1; }
-  .hand-log { display: none; }
+  .wager-control .primary { flex: 1; }
+  .hand-log { display: flex; height: 320px; }
   .history-layout, .settings-grid, .admin-grid { grid-template-columns: 1fr; }
 }
 

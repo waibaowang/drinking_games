@@ -85,6 +85,11 @@ public class RoomStore {
         return jdbc.query("select * from poker_rooms where status = 'ACTIVE' order by created_at", this::mapRoom);
     }
 
+    public boolean codeExists(String code) {
+        Integer count = jdbc.queryForObject("select count(*) from poker_rooms where code = ?", Integer.class, code);
+        return count != null && count > 0;
+    }
+
     private PokerRoom mapRoom(ResultSet rs, int rowNum) throws SQLException {
         UUID id = UUID.fromString(rs.getString("id"));
         TableConfig config = new TableConfig(rs.getLong("small_blind"), rs.getLong("big_blind"),

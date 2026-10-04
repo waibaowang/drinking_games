@@ -1,15 +1,10 @@
-package cn.friendpoker.server;
+package cn.friendpoker.server.room;
 
 import cn.friendpoker.domain.game.ActionType;
 import cn.friendpoker.domain.game.PlayerSnapshot;
 import cn.friendpoker.domain.game.Street;
 import cn.friendpoker.domain.game.TableSnapshot;
-import cn.friendpoker.server.room.CreateRoomRequest;
-import cn.friendpoker.server.room.GameCoordinator;
-import cn.friendpoker.server.room.PokerRoom;
-import cn.friendpoker.server.room.RoomService;
-import cn.friendpoker.server.room.RoomStore;
-import cn.friendpoker.server.room.RoomStatus;
+import cn.friendpoker.server.PokerApplication;
 import cn.friendpoker.server.user.UserAccount;
 import cn.friendpoker.server.user.UserAccountRepository;
 import cn.friendpoker.server.user.UserRole;
@@ -28,7 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-@SpringBootTest(properties = {
+@SpringBootTest(classes = PokerApplication.class, properties = {
         "spring.datasource.url=jdbc:h2:mem:room-test;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE",
         "spring.jpa.hibernate.ddl-auto=validate"
 })
@@ -70,14 +65,13 @@ class RoomPersistenceTest {
         PlayerSnapshot raceActor = actor(raceState);
         ActionType raceAction = passive(room.table().snapshotFor(raceActor.id()));
         CountDownLatch gate = new CountDownLatch(1);
-        AtomicInteger accepted = new AtomicInteger();
         try (var executor = Executors.newFixedThreadPool(2)) {
-            var one = executor.submit(() -> race(gate, accepted, room, raceActor, raceAction, raceState.version(), "race-1"));
-            var two = executor.submit(() -> race(gate, accepted, room, raceActor, raceAction, raceState.version(), "race-2"));
+            var one = executor.submit(() -> raceAction(gate, room, raceActor, raceAction, raceState.version()));
+            var two = executor.submit(() -> raceTimeout(gate, room, raceState.version()));
             gate.countDown();
             one.get(); two.get();
         }
-        assertEquals(1, accepted.get());
+        assertEquals(raceState.version() + 1, room.table().snapshotFor("").version());
 
         games.close(room.id(), host);
         assertEquals(RoomStatus.CLOSED, room.status());
@@ -86,15 +80,19 @@ class RoomPersistenceTest {
                         room.table().snapshotFor("").version()));
     }
 
-    private void race(CountDownLatch gate, AtomicInteger accepted, PokerRoom room, PlayerSnapshot actor,
-                      ActionType action, long version, String actionId) {
+    private void raceAction(CountDownLatch gate, PokerRoom room, PlayerSnapshot actor,
+                            ActionType action, long version) {
         try {
             gate.await();
-            games.act(room.id(), actor.id(), actionId, action, 0, version);
-            accepted.incrementAndGet();
+            games.act(room.id(), actor.id(), "race-action", action, 0, version);
         } catch (Exception ignored) {
-            // Exactly one contender is expected to lose on the version check.
+            // The timeout may win the same-version race.
         }
+    }
+
+    private void raceTimeout(CountDownLatch gate, PokerRoom room, long version) {
+        try { gate.await(); games.timeout(room.id(), version); }
+        catch (InterruptedException exception) { Thread.currentThread().interrupt(); }
     }
 
     private void waitUntilDealt(PokerRoom room) throws InterruptedException {

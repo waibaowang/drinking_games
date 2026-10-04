@@ -6,6 +6,7 @@ import cn.friendpoker.domain.game.HoldemTable;
 import cn.friendpoker.domain.game.PlayerSnapshot;
 import cn.friendpoker.domain.game.Street;
 import cn.friendpoker.domain.game.TableSnapshot;
+import cn.friendpoker.server.user.UserAccountRepository;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,24 +32,25 @@ public class GameCoordinator {
     private static final Logger log = LoggerFactory.getLogger(GameCoordinator.class);
     private final RoomService rooms;
     private final SimpMessagingTemplate messaging;
+    private final UserAccountRepository users;
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2, runnable -> {
         Thread thread = new Thread(runnable, "poker-action-timer");
         thread.setDaemon(true);
         return thread;
     });
     private final Map<UUID, TimerState> timers = new ConcurrentHashMap<>();
+    private final java.util.Set<UUID> pendingDeals = ConcurrentHashMap.newKeySet();
 
-    public GameCoordinator(RoomService rooms, SimpMessagingTemplate messaging) {
+    public GameCoordinator(RoomService rooms, SimpMessagingTemplate messaging, UserAccountRepository users) {
         this.rooms = rooms;
         this.messaging = messaging;
+        this.users = users;
     }
 
     @EventListener(ApplicationReadyEvent.class)
     void resumeRecoveredRooms() {
         rooms.allInMemory().stream().filter(room -> room.status() == RoomStatus.ACTIVE).forEach(room -> {
-            if (room.table().snapshotFor("").street() == Street.SHUFFLE_PENDING) {
-                scheduleDeal(room, room.table().snapshotFor("").version(), 200);
-            } else {
+            if (room.table().snapshotFor("").street() != Street.SHUFFLE_PENDING) {
                 scheduleTimeout(room);
             }
         });
@@ -60,7 +62,13 @@ public class GameCoordinator {
     }
 
     public RoomState state(UUID roomId, String viewer) {
-        return toState(rooms.requireMember(roomId, viewer), viewer);
+        PokerRoom room = rooms.requireMember(roomId, viewer);
+        RoomState state = toState(room, viewer);
+        if (state.table().street() == Street.SHUFFLE_PENDING) {
+            announceCommitment(room);
+            scheduleDeal(room, state.table().version(), 500);
+        }
+        return state;
     }
 
     public void sit(UUID roomId, String username, String displayName, int seat) {
@@ -86,10 +94,7 @@ public class GameCoordinator {
                     candidate.snapshotFor("").handNumber(), username);
         }
         cancelTimer(room.id());
-        TableSnapshot committed = room.table().snapshotFor("");
-        room.members().forEach(member -> messaging.convertAndSendToUser(member,
-                "/queue/rooms/" + room.id() + "/shuffle",
-                new ShuffleCommitment(committed.handNumber(), committed.shuffleCommitment(), committed.version())));
+        announceCommitment(room);
         broadcast(room);
         scheduleDeal(room, preparedVersion, 500);
     }
@@ -115,8 +120,8 @@ public class GameCoordinator {
         if (duplicate) {
             log.info("room={} user={} actionId={} operation={} duplicate", room.id(), username, actionId, action);
         }
-        broadcast(room);
         scheduleTimeout(room);
+        broadcast(room);
     }
 
     public void close(UUID roomId, String adminUsername) {
@@ -143,7 +148,7 @@ public class GameCoordinator {
             throw new IllegalArgumentException("聊天内容长度应为 1 到 200 字");
         }
         ChatMessage message = new ChatMessage(username, displayName, cleaned, Instant.now());
-        room.members().forEach(member -> messaging.convertAndSendToUser(member,
+        activeMembers(room).forEach(member -> messaging.convertAndSendToUser(member,
                 "/queue/rooms/" + room.id() + "/chat", message));
     }
 
@@ -157,8 +162,8 @@ public class GameCoordinator {
             log.info("room={} hand={} user={} operation={} accepted", room.id(),
                     candidate.snapshotFor("").handNumber(), username, label);
         }
-        broadcast(room);
         scheduleTimeout(room);
+        broadcast(room);
     }
 
     private HoldemTable cloneTable(PokerRoom room) {
@@ -177,7 +182,11 @@ public class GameCoordinator {
     }
 
     private void scheduleDeal(PokerRoom room, long expectedVersion, long delayMillis) {
-        scheduler.schedule(() -> deal(room.id(), expectedVersion), delayMillis, TimeUnit.MILLISECONDS);
+        if (!pendingDeals.add(room.id())) return;
+        scheduler.schedule(() -> {
+            pendingDeals.remove(room.id());
+            deal(room.id(), expectedVersion);
+        }, delayMillis, TimeUnit.MILLISECONDS);
     }
 
     private void deal(UUID roomId, long expectedVersion) {
@@ -192,12 +201,17 @@ public class GameCoordinator {
                 candidate.dealPreparedHand();
                 install(room, candidate, room.recentActionIds(), nextDeadline(room, candidate), RoomStatus.ACTIVE);
             }
-            broadcast(room);
             scheduleTimeout(room);
+            broadcast(room);
         } catch (GameRuleException exception) {
             log.info("room={} operation=DEAL skipped reason={}", roomId, exception.getMessage());
         } catch (RuntimeException exception) {
             log.error("room={} operation=DEAL failed", roomId, exception);
+            PokerRoom current = rooms.get(roomId);
+            if (current.status() == RoomStatus.ACTIVE
+                    && current.table().snapshotFor("").version() == expectedVersion) {
+                scheduleDeal(current, expectedVersion, 2_000);
+            }
         }
     }
 
@@ -206,17 +220,17 @@ public class GameCoordinator {
         TableSnapshot snapshot = room.table().snapshotFor("");
         if (room.status() != RoomStatus.ACTIVE || snapshot.actorSeat() == null || room.actionDeadline() == null) return;
         long delay = Math.max(0, Duration.between(Instant.now(), room.actionDeadline()).toMillis());
-        ScheduledFuture<?> future = scheduler.schedule(() -> timeout(room.id(), snapshot.version()),
-                delay, TimeUnit.MILLISECONDS);
-        timers.put(room.id(), new TimerState(snapshot.version(), room.actionDeadline(), future));
+        TimerState timer = new TimerState(snapshot.version(), room.actionDeadline());
+        timers.put(room.id(), timer);
+        timer.future = scheduler.schedule(() -> timeout(room.id(), snapshot.version()), delay, TimeUnit.MILLISECONDS);
     }
 
     private void cancelTimer(UUID roomId) {
         TimerState previous = timers.remove(roomId);
-        if (previous != null) previous.future().cancel(false);
+        if (previous != null && previous.future != null) previous.future.cancel(false);
     }
 
-    private void timeout(UUID roomId, long expectedVersion) {
+    void timeout(UUID roomId, long expectedVersion) {
         PokerRoom room;
         try {
             room = rooms.get(roomId);
@@ -235,18 +249,42 @@ public class GameCoordinator {
                 log.info("room={} hand={} user={} actionId={} operation=TIMEOUT_{} accepted", room.id(),
                         candidate.snapshotFor("").handNumber(), actor.id(), actionId, fallback);
             }
-            broadcast(room);
             scheduleTimeout(room);
+            broadcast(room);
         } catch (GameRuleException exception) {
             log.info("room={} operation=TIMEOUT skipped reason={}", roomId, exception.getMessage());
         } catch (RuntimeException exception) {
             log.error("room={} operation=TIMEOUT failed", roomId, exception);
+            PokerRoom current = rooms.get(roomId);
+            if (current.status() == RoomStatus.ACTIVE
+                    && current.table().snapshotFor("").version() == expectedVersion) {
+                scheduleTimeoutRetry(current, expectedVersion);
+            }
         }
     }
 
+    private void scheduleTimeoutRetry(PokerRoom room, long expectedVersion) {
+        cancelTimer(room.id());
+        TimerState timer = new TimerState(expectedVersion, Instant.now().plusSeconds(2));
+        timers.put(room.id(), timer);
+        timer.future = scheduler.schedule(() -> timeout(room.id(), expectedVersion), 2, TimeUnit.SECONDS);
+    }
+
     private void broadcast(PokerRoom room) {
-        room.members().forEach(member -> messaging.convertAndSendToUser(member,
+        activeMembers(room).forEach(member -> messaging.convertAndSendToUser(member,
                 "/queue/rooms/" + room.id(), toState(room, member)));
+    }
+
+    private void announceCommitment(PokerRoom room) {
+        TableSnapshot committed = room.table().snapshotFor("");
+        activeMembers(room).forEach(member -> messaging.convertAndSendToUser(member,
+                "/queue/rooms/" + room.id() + "/shuffle",
+                new ShuffleCommitment(committed.handNumber(), committed.shuffleCommitment(), committed.version())));
+    }
+
+    private List<String> activeMembers(PokerRoom room) {
+        return room.members().stream().filter(member -> users.findByUsernameIgnoreCase(member)
+                .map(account -> account.isEnabled()).orElse(false)).toList();
     }
 
     private RoomState toState(PokerRoom room, String viewer) {
@@ -254,7 +292,16 @@ public class GameCoordinator {
                 room.table().snapshotFor(viewer), room.actionDeadline(), room.status(), room.recovered());
     }
 
-    private record TimerState(long version, Instant deadline, ScheduledFuture<?> future) {}
+    private static final class TimerState {
+        private final long version;
+        private final Instant deadline;
+        private volatile ScheduledFuture<?> future;
+
+        private TimerState(long version, Instant deadline) {
+            this.version = version;
+            this.deadline = deadline;
+        }
+    }
     public record ChatMessage(String username, String displayName, String text, Instant sentAt) {}
     public record ShuffleCommitment(long handNumber, String commitment, long version) {}
 }

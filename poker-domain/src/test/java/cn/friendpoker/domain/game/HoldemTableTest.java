@@ -1,6 +1,13 @@
 package cn.friendpoker.domain.game;
 
+import cn.friendpoker.domain.card.Card;
+import cn.friendpoker.domain.card.Deck;
+import cn.friendpoker.domain.card.Rank;
+import cn.friendpoker.domain.card.Suit;
 import org.junit.jupiter.api.Test;
+
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -117,6 +124,60 @@ class HoldemTableTest {
         }
     }
 
+    @Test
+    void cumulativeShortAllInsReopenRaising() {
+        HoldemTable table = new HoldemTable(new TableConfig(10, 20, 1_000, 6, 30));
+        table.sitDown("button", "Button", 0, 1_000);
+        table.sitDown("short1", "Short 1", 1, 150);
+        table.sitDown("short2", "Short 2", 2, 200);
+        table.sitDown("raiser", "Raiser", 3, 1_000);
+        table.startHand();
+
+        actTo(table, "raiser", ActionType.RAISE, 100);
+        actTo(table, "button", ActionType.CALL, 0);
+        actTo(table, "short1", ActionType.ALL_IN, 0);
+        actTo(table, "short2", ActionType.ALL_IN, 0);
+        actTo(table, "raiser", ActionType.CALL, 0);
+
+        assertTrue(table.snapshotFor("button").legalActions().contains(ActionType.RAISE));
+    }
+
+    @Test
+    void oddChipStartsWithFirstWinnerLeftOfButton() {
+        HoldemTable table = new HoldemTable(new TableConfig(1, 2, 100, 6, 30));
+        table.sitDown("button", "Button", 0, 100);
+        table.sitDown("small", "Small", 1, 100);
+        table.sitDown("big", "Big", 2, 100);
+        table.startHand(royalBoardDeck());
+
+        actTo(table, "button", ActionType.CALL, 0);
+        actTo(table, "small", ActionType.FOLD, 0);
+        actTo(table, "big", ActionType.CHECK, 0);
+        while (table.snapshotFor("").street() != Street.COMPLETE) actCurrent(table, ActionType.CHECK);
+
+        TableSnapshot result = table.snapshotFor("");
+        assertEquals(100, result.players().stream().filter(p -> p.id().equals("button")).findFirst().orElseThrow().stack());
+        assertEquals(101, result.players().stream().filter(p -> p.id().equals("big")).findFirst().orElseThrow().stack());
+    }
+
+    private Deck royalBoardDeck() {
+        List<Card> cards = new ArrayList<>();
+        for (Suit suit : Suit.values()) for (Rank rank : Rank.values()) cards.add(new Card(rank, suit));
+        place(cards, 7, new Card(Rank.TEN, Suit.SPADES));
+        place(cards, 8, new Card(Rank.JACK, Suit.SPADES));
+        place(cards, 9, new Card(Rank.QUEEN, Suit.SPADES));
+        place(cards, 11, new Card(Rank.KING, Suit.SPADES));
+        place(cards, 13, new Card(Rank.ACE, Suit.SPADES));
+        return new Deck(cards);
+    }
+
+    private void place(List<Card> cards, int index, Card card) {
+        int current = cards.indexOf(card);
+        Card displaced = cards.get(index);
+        cards.set(index, card);
+        cards.set(current, displaced);
+    }
+
     private HoldemTable tableWithPlayers(int count) {
         HoldemTable table = new HoldemTable(new TableConfig(10, 20, 1_000, 9, 30));
         for (int i = 0; i < count; i++) table.sitDown("p" + i, "P" + i, i * 2, 1_000);
@@ -133,6 +194,11 @@ class HoldemTableTest {
         TableSnapshot snapshot = table.snapshotFor("");
         PlayerSnapshot actor = snapshot.players().stream().filter(p -> p.seat() == snapshot.actorSeat()).findFirst().orElseThrow();
         table.act(actor.id(), action, 0, snapshot.version());
+    }
+
+    private void actTo(HoldemTable table, String player, ActionType action, long amount) {
+        TableSnapshot snapshot = table.snapshotFor(player);
+        table.act(player, action, amount, snapshot.version());
     }
 
     private void act(HoldemTable table, String player, ActionType action) {

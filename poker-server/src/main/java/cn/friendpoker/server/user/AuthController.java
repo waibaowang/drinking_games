@@ -50,6 +50,7 @@ public class AuthController {
         rateLimiter.check(ip);
         Authentication authentication = authenticationManager.authenticate(
                 UsernamePasswordAuthenticationToken.unauthenticated(body.username(), body.password()));
+        if (request.getSession(false) != null) request.changeSessionId();
         SecurityContext context = SecurityContextHolder.createEmptyContext();
         context.setAuthentication(authentication);
         SecurityContextHolder.setContext(context);

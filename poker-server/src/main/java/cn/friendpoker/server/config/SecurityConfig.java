@@ -1,13 +1,13 @@
 package cn.friendpoker.server.config;
 
 import cn.friendpoker.server.user.UserAccountRepository;
+import cn.friendpoker.server.user.AccountPrincipal;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -26,11 +26,8 @@ public class SecurityConfig {
     @Bean
     UserDetailsService userDetailsService(UserAccountRepository users) {
         return username -> users.findByUsernameIgnoreCase(username)
-                .map(account -> User.withUsername(account.getUsername())
-                        .password(account.getPasswordHash())
-                        .roles(account.getRole().name())
-                        .disabled(!account.isEnabled())
-                        .build())
+                .map(account -> new AccountPrincipal(account.getUsername(), account.getPasswordHash(),
+                        account.getRole(), account.isEnabled(), account.getAuthVersion()))
                 .orElseThrow(() -> new org.springframework.security.core.userdetails.UsernameNotFoundException("用户不存在"));
     }
 

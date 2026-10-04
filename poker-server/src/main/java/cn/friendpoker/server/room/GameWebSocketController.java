@@ -14,9 +14,12 @@ import cn.friendpoker.server.user.UserAccountRepository;
 import java.security.Principal;
 import java.time.Instant;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Controller
 public class GameWebSocketController {
+    private static final Logger log = LoggerFactory.getLogger(GameWebSocketController.class);
     private final GameCoordinator games;
     private final UserAccountRepository users;
 
@@ -27,8 +30,14 @@ public class GameWebSocketController {
 
     @MessageMapping("/rooms/{roomId}/action")
     public void action(@DestinationVariable UUID roomId, @Payload ActionMessage message, Principal principal) {
-        if (message.action() == null) throw new IllegalArgumentException("缺少操作类型");
-        games.act(roomId, principal.getName(), message.actionId(), message.action(), message.amount(), message.version());
+        try {
+            if (message.action() == null) throw new IllegalArgumentException("缺少操作类型");
+            games.act(roomId, principal.getName(), message.actionId(), message.action(), message.amount(), message.version());
+        } catch (RuntimeException exception) {
+            log.info("room={} user={} actionId={} operation={} rejected reason={}", roomId, principal.getName(),
+                    message.actionId(), message.action(), exception.getMessage());
+            throw exception;
+        }
     }
 
     @MessageMapping("/rooms/{roomId}/chat")

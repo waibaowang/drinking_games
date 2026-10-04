@@ -1,6 +1,7 @@
 package cn.friendpoker.server.config;
 
 import cn.friendpoker.server.user.UserAccountRepository;
+import cn.friendpoker.server.user.AccountPrincipal;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.Message;
@@ -13,6 +14,8 @@ import org.springframework.messaging.simp.config.MessageBrokerRegistry;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
+
+import java.security.Principal;
 
 @Configuration
 @EnableWebSocketMessageBroker
@@ -45,13 +48,34 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
             @Override
             public Message<?> preSend(Message<?> message, MessageChannel channel) {
                 StompHeaderAccessor accessor = StompHeaderAccessor.wrap(message);
-                if (accessor.getUser() != null) {
-                    boolean enabled = users.findByUsernameIgnoreCase(accessor.getUser().getName())
-                            .map(account -> account.isEnabled()).orElse(false);
-                    if (!enabled) throw new AccessDeniedException("账号已禁用");
-                }
+                if (!valid(accessor)) throw new AccessDeniedException("账号登录状态已失效");
                 return message;
             }
         });
+    }
+
+    @Override
+    public void configureClientOutboundChannel(ChannelRegistration registration) {
+        registration.interceptors(new ChannelInterceptor() {
+            @Override
+            public Message<?> preSend(Message<?> message, MessageChannel channel) {
+                StompHeaderAccessor accessor = StompHeaderAccessor.wrap(message);
+                return valid(accessor) ? message : null;
+            }
+        });
+    }
+
+    private boolean valid(StompHeaderAccessor accessor) {
+        return valid(accessor.getUser());
+    }
+
+    boolean valid(Principal user) {
+        if (user == null) return true;
+        return users.findByUsernameIgnoreCase(user.getName())
+                .map(account -> account.isEnabled()
+                        && (!(user instanceof org.springframework.security.core.Authentication auth)
+                        || !(auth.getPrincipal() instanceof AccountPrincipal principal)
+                        || principal.authVersion() == account.getAuthVersion()))
+                .orElse(false);
     }
 }

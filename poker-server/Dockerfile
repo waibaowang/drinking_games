@@ -10,10 +10,13 @@ RUN mvn -B -pl poker-server -am package -DskipTests
 
 FROM eclipse-temurin:25-jre
 WORKDIR /app
-RUN useradd --system --uid 10001 poker
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --uid 10001 poker
 COPY --from=build /build/poker-server/target/poker-server-*.jar app.jar
 RUN mkdir -p /app/data && chown -R poker:poker /app
 USER poker
 EXPOSE 8080
+HEALTHCHECK --interval=10s --timeout=4s --start-period=30s --retries=12 \
+    CMD curl -fsS http://127.0.0.1:8080/actuator/health || exit 1
 ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75", "-jar", "/app/app.jar", "--spring.profiles.active=prod"]
-

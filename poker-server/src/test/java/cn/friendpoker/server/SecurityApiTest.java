@@ -9,8 +9,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.mock.web.MockHttpSession;
 
 import java.util.UUID;
 
@@ -20,6 +22,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:h2:mem:security-test;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE",
@@ -30,6 +33,7 @@ class SecurityApiTest {
     @Autowired MockMvc mvc;
     @Autowired UserAccountRepository users;
     @Autowired PasswordEncoder passwords;
+    @Autowired JdbcTemplate jdbc;
     private String admin;
     private String player;
 
@@ -72,5 +76,46 @@ class SecurityApiTest {
         mvc.perform(post("/api/admin/users").with(csrf()).with(user(admin).roles("ADMIN"))
                         .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.role").value("PLAYER"));
+    }
+
+    @Test
+    void successfulLoginRotatesAnExistingSessionId() throws Exception {
+        MockHttpSession session = new MockHttpSession();
+        String previousId = session.getId();
+        var result = mvc.perform(post("/api/auth/login").session(session).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"%s\",\"password\":\"password123\"}".formatted(player)))
+                .andExpect(status().isOk()).andReturn();
+        assertNotEquals(previousId, result.getRequest().getSession(false).getId());
+    }
+
+    @Test
+    void disableAndReenableStillInvalidatesTheOldLoginSession() throws Exception {
+        MockHttpSession initialSession = new MockHttpSession();
+        var login = mvc.perform(post("/api/auth/login").session(initialSession).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"%s\",\"password\":\"password123\"}".formatted(player)))
+                .andExpect(status().isOk()).andReturn();
+        MockHttpSession loggedInSession = (MockHttpSession) login.getRequest().getSession(false);
+
+        UserAccount account = users.findByUsernameIgnoreCase(player).orElseThrow();
+        account.setEnabled(false);
+        users.saveAndFlush(account);
+        account.setEnabled(true);
+        users.saveAndFlush(account);
+
+        mvc.perform(get("/api/auth/me").session(loggedInSession))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void historyDetailIsVisibleOnlyToAParticipant() throws Exception {
+        jdbc.update("insert into hand_records (id, room_id, hand_number, summary, completed_at, room_name) values ('history-1','room',1,'summary',current_timestamp,'Room')");
+        jdbc.update("insert into hand_record_players (hand_id, username) values ('history-1',?)", admin);
+
+        mvc.perform(get("/api/history/history-1").with(user(player).roles("PLAYER")))
+                .andExpect(status().isBadRequest());
+        mvc.perform(get("/api/history/history-1").with(user(admin).roles("ADMIN")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.summary").value("summary"));
     }
 }

@@ -36,6 +36,9 @@ public class UserAccount {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    @Column(name = "auth_version", nullable = false)
+    private long authVersion;
+
     protected UserAccount() {
     }
 
@@ -48,6 +51,7 @@ public class UserAccount {
         this.role = role.name();
         this.enabled = true;
         this.updatedAt = this.createdAt;
+        this.authVersion = 0;
     }
 
     public String getId() { return id; }
@@ -58,6 +62,7 @@ public class UserAccount {
     public UserRole getRole() { return UserRole.valueOf(role); }
     public boolean isEnabled() { return enabled; }
     public Instant getUpdatedAt() { return updatedAt; }
+    public long getAuthVersion() { return authVersion; }
 
     public void updateProfile(String displayName) {
         this.displayName = displayName;
@@ -67,15 +72,18 @@ public class UserAccount {
     public void resetPassword(String passwordHash) {
         this.passwordHash = passwordHash;
         this.updatedAt = Instant.now();
+        this.authVersion++;
     }
 
     public void setEnabled(boolean enabled) {
         this.enabled = enabled;
         this.updatedAt = Instant.now();
+        this.authVersion++;
     }
 
     public void setRole(UserRole role) {
         this.role = role.name();
         this.updatedAt = Instant.now();
+        this.authVersion++;
     }
 }

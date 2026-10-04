@@ -19,10 +19,11 @@ class MigrationUpgradeTest {
 
         Flyway.configure().dataSource(url, "sa", "").load().migrate();
         try (var connection = DriverManager.getConnection(url, "sa", ""); var statement = connection.createStatement()) {
-            try (var result = statement.executeQuery("select role, enabled from user_accounts where id='u1'")) {
+            try (var result = statement.executeQuery("select role, enabled, auth_version from user_accounts where id='u1'")) {
                 result.next();
                 assertEquals("PLAYER", result.getString(1));
                 assertEquals(true, result.getBoolean(2));
+                assertEquals(0, result.getLong(3));
             }
             try (var result = statement.executeQuery("select room_name from hand_records where id='h1'")) {
                 result.next();

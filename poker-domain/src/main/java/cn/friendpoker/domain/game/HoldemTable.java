@@ -25,7 +25,7 @@ public final class HoldemTable {
     private final Map<Integer, PlayerState> seats = new LinkedHashMap<>();
     private final List<Card> board = new ArrayList<>(5);
     private final LinkedHashSet<Integer> needsAction = new LinkedHashSet<>();
-    private final Set<Integer> actedSinceFullRaise = new HashSet<>();
+    private final Map<Integer, Long> actedAtBet = new HashMap<>();
     private final List<String> messages = new ArrayList<>();
     private Deck deck;
     private Street street = Street.WAITING;
@@ -94,7 +94,7 @@ public final class HoldemTable {
         board.clear();
         messages.clear();
         needsAction.clear();
-        actedSinceFullRaise.clear();
+        actedAtBet.clear();
         seats.values().forEach(PlayerState::prepareForHand);
         actorSeat = null;
         currentBet = 0;
@@ -148,12 +148,38 @@ public final class HoldemTable {
                 .toList();
         return new TablePersistenceState(players, board, deck == null ? List.of() : deck.cards(),
                 deck == null ? 0 : deck.cursor(), street, version, handNumber, currentBet, minimumRaise,
-                buttonSeat, smallBlindSeat, bigBlindSeat, actorSeat, needsAction, actedSinceFullRaise,
+                buttonSeat, smallBlindSeat, bigBlindSeat, actorSeat, needsAction, Set.of(), actedAtBet,
                 messages, shuffleCommitment, shuffleSeed);
     }
 
     public static HoldemTable restore(TableConfig config, TablePersistenceState state) {
         Objects.requireNonNull(state);
+        if (state.players().stream().map(PlayerPersistenceState::seat).distinct().count() != state.players().size()
+                || state.players().stream().map(PlayerPersistenceState::id).distinct().count() != state.players().size()) {
+            throw new IllegalArgumentException("Duplicate player in saved table");
+        }
+        if (state.players().stream().anyMatch(player -> player.seat() < 0 || player.seat() >= config.maxPlayers()
+                || player.stack() < 0 || player.committedStreet() < 0 || player.committedHand() < 0
+                || player.holeCards().size() > 2)) {
+            throw new IllegalArgumentException("Invalid player in saved table");
+        }
+        Set<Card> visibleCards = new HashSet<>(state.board());
+        int visibleCount = state.board().size();
+        for (PlayerPersistenceState player : state.players()) {
+            visibleCount += player.holeCards().size();
+            visibleCards.addAll(player.holeCards());
+        }
+        if (visibleCards.size() != visibleCount
+                || (!state.deck().isEmpty() && !state.deck().containsAll(visibleCards))) {
+            throw new IllegalArgumentException("Invalid cards in saved table");
+        }
+        if (state.shuffleSeed() != null && state.shuffleCommitment() != null
+                && !FairShuffle.commitmentOf(state.shuffleSeed()).equals(state.shuffleCommitment())) {
+            throw new IllegalArgumentException("Shuffle commitment does not match saved seed");
+        }
+        if (state.actorSeat() != null && state.players().stream().noneMatch(p -> p.seat() == state.actorSeat())) {
+            throw new IllegalArgumentException("Invalid actor in saved table");
+        }
         HoldemTable table = new HoldemTable(config);
         for (PlayerPersistenceState saved : state.players()) {
             PlayerState player = new PlayerState(saved.id(), saved.name(), saved.seat(), saved.stack());
@@ -175,7 +201,8 @@ public final class HoldemTable {
         table.bigBlindSeat = state.bigBlindSeat();
         table.actorSeat = state.actorSeat();
         table.needsAction.addAll(state.needsAction());
-        table.actedSinceFullRaise.addAll(state.actedSinceFullRaise());
+        table.actedAtBet.putAll(state.actedAtBet());
+        state.actedSinceFullRaise().forEach(seat -> table.actedAtBet.putIfAbsent(seat, state.currentBet()));
         table.messages.addAll(state.messages());
         table.shuffleCommitment = state.shuffleCommitment();
         table.shuffleSeed = state.shuffleSeed();
@@ -250,7 +277,7 @@ public final class HoldemTable {
     private void fold(PlayerState player) {
         player.status = PlayerStatus.FOLDED;
         needsAction.remove(player.seat);
-        actedSinceFullRaise.add(player.seat);
+        actedAtBet.put(player.seat, currentBet);
         messages.add(player.name + " 弃牌");
     }
 
@@ -259,7 +286,7 @@ public final class HoldemTable {
             throw new GameRuleException("有待跟注筹码，不能过牌");
         }
         needsAction.remove(player.seat);
-        actedSinceFullRaise.add(player.seat);
+        actedAtBet.put(player.seat, currentBet);
         messages.add(player.name + " 过牌");
     }
 
@@ -270,7 +297,7 @@ public final class HoldemTable {
         }
         long paid = player.commit(owed);
         needsAction.remove(player.seat);
-        actedSinceFullRaise.add(player.seat);
+        actedAtBet.put(player.seat, currentBet);
         messages.add(player.name + " 跟注 " + paid + (player.status == PlayerStatus.ALL_IN ? "（All-in）" : ""));
     }
 
@@ -287,7 +314,7 @@ public final class HoldemTable {
         if (target > allInTarget) {
             throw new GameRuleException("筹码不足");
         }
-        if (actedSinceFullRaise.contains(player.seat)) {
+        if (!hasRaiseRights(player)) {
             throw new GameRuleException("短码 All-in 没有重新开放你的加注权");
         }
 
@@ -302,7 +329,6 @@ public final class HoldemTable {
         currentBet = target;
         if (fullRaise) {
             minimumRaise = previousBet == 0 ? target : raiseSize;
-            actedSinceFullRaise.clear();
             needsAction.clear();
             orderedSeats(candidate -> candidate.status == PlayerStatus.ACTIVE && candidate.seat != player.seat)
                     .forEach(needsAction::add);
@@ -310,7 +336,7 @@ public final class HoldemTable {
             orderedSeats(candidate -> candidate.status == PlayerStatus.ACTIVE
                     && candidate.seat != player.seat && candidate.committedStreet < currentBet).forEach(needsAction::add);
         }
-        actedSinceFullRaise.add(player.seat);
+        actedAtBet.put(player.seat, currentBet);
         needsAction.remove(player.seat);
         String label = previousBet == 0 ? "下注" : "加注到";
         messages.add(player.name + " " + label + " " + target
@@ -321,16 +347,21 @@ public final class HoldemTable {
         EnumSet<ActionType> actions = EnumSet.of(ActionType.FOLD, ActionType.ALL_IN);
         if (player.committedStreet == currentBet) {
             actions.add(ActionType.CHECK);
-            if (currentBet == 0 && player.stack > 0 && !actedSinceFullRaise.contains(player.seat)) {
+            if (currentBet == 0 && player.stack > 0 && hasRaiseRights(player)) {
                 actions.add(ActionType.BET);
             }
         } else {
             actions.add(ActionType.CALL);
-            if (player.committedStreet + player.stack > currentBet && !actedSinceFullRaise.contains(player.seat)) {
+            if (player.committedStreet + player.stack > currentBet && hasRaiseRights(player)) {
                 actions.add(ActionType.RAISE);
             }
         }
         return actions;
+    }
+
+    private boolean hasRaiseRights(PlayerState player) {
+        Long lastFacedBet = actedAtBet.get(player.seat);
+        return lastFacedBet == null || currentBet - lastFacedBet >= minimumRaise;
     }
 
     private void finishBettingRound() {
@@ -346,7 +377,7 @@ public final class HoldemTable {
         seats.values().forEach(player -> player.committedStreet = 0);
         currentBet = 0;
         minimumRaise = config.bigBlind();
-        actedSinceFullRaise.clear();
+        actedAtBet.clear();
         needsAction.clear();
 
         switch (street) {
@@ -478,7 +509,7 @@ public final class HoldemTable {
     }
 
     private int distanceLeftOfButton(PlayerState player) {
-        return Math.floorMod(player.seat - buttonSeat, config.maxPlayers());
+        return Math.floorMod(player.seat - buttonSeat - 1, config.maxPlayers());
     }
 
     private void requireBetweenHands() {

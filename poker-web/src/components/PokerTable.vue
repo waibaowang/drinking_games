@@ -11,6 +11,7 @@ const room = ref(props.initialRoom)
 const error = ref('')
 const connected = ref(false)
 const actionPending = ref(false)
+const pendingVersion = ref<number | null>(null)
 const recoveryDismissed = ref(false)
 const commitmentNotice = ref('')
 const wager = ref(props.initialRoom.config.bigBlind)
@@ -18,7 +19,9 @@ const now = ref(Date.now())
 const chatText = ref('')
 const chats = ref<Array<{ username: string; displayName: string; text: string; sentAt: string }>>([])
 let ticker = 0
+let pendingTimer = 0
 let client: Client | null = null
+let checkingSession = false
 
 const me = computed(() => room.value.table.players.find(player => player.id === props.user.username))
 const seated = computed(() => !!me.value)
@@ -54,6 +57,9 @@ function act(action: ActionType) {
   if (!client?.connected) { error.value = '实时连接尚未恢复'; return }
   const amount = action === 'BET' || action === 'RAISE' ? wager.value : 0
   actionPending.value = true
+  pendingVersion.value = room.value.table.version
+  window.clearTimeout(pendingTimer)
+  pendingTimer = window.setTimeout(refreshState, 6000)
   client.publish({ destination: `/app/rooms/${room.value.id}/action`, body: JSON.stringify({ actionId: crypto.randomUUID(), action, amount, version: room.value.table.version }) })
 }
 function sendChat() {
@@ -65,11 +71,13 @@ function sendChat() {
 function showError(cause: unknown) {
   error.value = cause instanceof Error ? cause.message : '操作失败'
   actionPending.value = false
+  pendingVersion.value = null
+  window.clearTimeout(pendingTimer)
   if (error.value.includes('状态已变化')) refreshState()
   window.setTimeout(() => error.value = '', 4000)
 }
 async function refreshState() {
-  try { room.value = await api<RoomState>(`/api/rooms/${room.value.id}`); actionPending.value = false }
+  try { applyIncoming(await api<RoomState>(`/api/rooms/${room.value.id}`)); actionPending.value = false; pendingVersion.value = null }
   catch (cause) { showError(cause) }
 }
 async function copyCode() {
@@ -78,7 +86,25 @@ async function copyCode() {
   window.setTimeout(() => commitmentNotice.value = '', 2500)
 }
 function setWager(value: number) {
-  wager.value = Math.max(Math.min(minimumTarget.value, maximumTarget.value), Math.min(maximumTarget.value, value))
+  const integer = Math.floor(value)
+  wager.value = Math.max(Math.min(minimumTarget.value, maximumTarget.value), Math.min(maximumTarget.value, integer))
+}
+function applyIncoming(incoming: RoomState) {
+  if (incoming.status === 'CLOSED' || incoming.table.version >= room.value.table.version) room.value = incoming
+  if (incoming.status === 'CLOSED' || (pendingVersion.value !== null && incoming.table.version > pendingVersion.value)) {
+    actionPending.value = false
+    pendingVersion.value = null
+    window.clearTimeout(pendingTimer)
+  }
+  wager.value = Math.min(maximumTarget.value, Math.max(minimumTarget.value, room.value.config.bigBlind))
+}
+async function checkSession() {
+  if (checkingSession) return
+  checkingSession = true
+  window.setTimeout(async () => {
+    try { await api<UserView>('/api/auth/me') } catch { /* api emits session-expired for 401 */ }
+    finally { checkingSession = false }
+  }, 700)
 }
 function connect() {
   const scheme = location.protocol === 'https:' ? 'wss' : 'ws'
@@ -90,9 +116,7 @@ function connect() {
     onConnect: async () => {
       connected.value = true
       client?.subscribe(`/user/queue/rooms/${room.value.id}`, message => {
-        room.value = JSON.parse(message.body)
-        actionPending.value = false
-        wager.value = Math.min(maximumTarget.value, Math.max(minimumTarget.value, room.value.config.bigBlind))
+        applyIncoming(JSON.parse(message.body))
       })
       client?.subscribe(`/user/queue/rooms/${room.value.id}/shuffle`, message => {
         const event = JSON.parse(message.body)
@@ -106,12 +130,13 @@ function connect() {
       })
       await refreshState()
     },
-    onWebSocketClose: () => { connected.value = false; actionPending.value = false },
+    onStompError: () => checkSession(),
+    onWebSocketClose: () => { connected.value = false; actionPending.value = false; checkSession() },
   })
   client.activate()
 }
 onMounted(() => { connect(); ticker = window.setInterval(() => now.value = Date.now(), 500) })
-onBeforeUnmount(() => { window.clearInterval(ticker); client?.deactivate() })
+onBeforeUnmount(() => { window.clearInterval(ticker); window.clearTimeout(pendingTimer); client?.deactivate() })
 </script>
 
 <template>
@@ -168,7 +193,7 @@ onBeforeUnmount(() => { window.clearInterval(ticker); client?.deactivate() })
               <button v-if="room.table.legalActions.includes('CHECK')" class="secondary" :disabled="actionPending" @click="act('CHECK')">过牌</button>
               <button v-if="room.table.legalActions.includes('CALL')" class="secondary" :disabled="actionPending" @click="act('CALL')">跟注 {{ Math.min(callAmount, me?.stack ?? 0) }}</button>
               <div v-if="room.table.legalActions.includes('BET') || room.table.legalActions.includes('RAISE')" class="wager-control">
-                <div class="wager-presets"><button type="button" @click="setWager(minimumTarget)">最小</button><button type="button" @click="setWager(room.table.pot / 2)">半池</button><button type="button" @click="setWager(room.table.pot)">一池</button></div>
+                <div class="wager-presets"><button type="button" @click="setWager(minimumTarget)">最小</button><button type="button" @click="setWager(Math.floor(room.table.pot / 2))">半池</button><button type="button" @click="setWager(room.table.pot)">一池</button></div>
                 <input v-model.number="wager" type="range" :min="Math.min(minimumTarget, maximumTarget)" :max="maximumTarget" :step="room.config.smallBlind" />
                 <input v-model.number="wager" type="number" :min="Math.min(minimumTarget, maximumTarget)" :max="maximumTarget" />
                 <button class="primary" :disabled="actionPending" @click="act(room.table.legalActions.includes('BET') ? 'BET' : 'RAISE')">{{ actionPending ? '提交中…' : room.table.legalActions.includes('BET') ? '下注' : '加注' }}</button>

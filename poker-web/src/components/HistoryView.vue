@@ -6,11 +6,13 @@ import type { HistoryItem, HistoryPage } from '../types'
 const data = ref<HistoryPage | null>(null)
 const selected = ref<HistoryItem | null>(null)
 const error = ref('')
+const loading = ref(true)
 
 async function load(page = 0) {
-  error.value = ''
+  error.value = ''; loading.value = true; selected.value = null
   try { data.value = await api<HistoryPage>(`/api/history?page=${page}&size=20`) }
   catch (cause) { error.value = cause instanceof Error ? cause.message : '加载失败' }
+  finally { loading.value = false }
 }
 async function detail(id: string) {
   try { selected.value = await api<HistoryItem>(`/api/history/${id}`) }
@@ -23,7 +25,8 @@ onMounted(() => load())
   <section class="page-section">
     <div class="page-heading"><div><p class="eyebrow">HAND HISTORY</p><h1>牌局历史</h1></div><span class="muted">只显示你参与过的手牌</span></div>
     <p v-if="error" class="error-banner">{{ error }}</p>
-    <div v-if="data?.items.length" class="history-layout">
+    <div v-if="loading" class="empty-state panel">正在加载牌局历史…</div>
+    <div v-else-if="data?.items.length" class="history-layout">
       <div class="history-list panel">
         <button v-for="item in data.items" :key="item.id" :class="{ selected: selected?.id === item.id }" @click="detail(item.id)">
           <span><strong>{{ item.roomName }}</strong><small>第 {{ item.handNumber }} 手</small></span>

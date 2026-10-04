@@ -119,6 +119,6 @@ public class RoomService {
     }
 
     private boolean codeExists(String code) {
-        return rooms.values().stream().anyMatch(room -> room.code().equals(code));
+        return rooms.values().stream().anyMatch(room -> room.code().equals(code)) || store.codeExists(code);
     }
 }
