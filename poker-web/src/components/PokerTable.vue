@@ -2,10 +2,10 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Client } from '@stomp/stompjs'
 import { api } from '../api'
-import type { ActionType, PlayerSnapshot, RoomState, UserView } from '../types'
+import type { ActionType, PlayerSnapshot, PokerRoomState, UserView } from '../types'
 import PlayingCard from './PlayingCard.vue'
 
-const props = defineProps<{ initialRoom: RoomState; user: UserView }>()
+const props = defineProps<{ initialRoom: PokerRoomState; user: UserView }>()
 const emit = defineEmits<{ leave: [] }>()
 const room = ref(props.initialRoom)
 const error = ref('')
@@ -77,7 +77,7 @@ function showError(cause: unknown) {
   window.setTimeout(() => error.value = '', 4000)
 }
 async function refreshState() {
-  try { applyIncoming(await api<RoomState>(`/api/rooms/${room.value.id}`)); actionPending.value = false; pendingVersion.value = null }
+  try { applyIncoming(await api<PokerRoomState>(`/api/rooms/${room.value.id}`)); actionPending.value = false; pendingVersion.value = null }
   catch (cause) { showError(cause) }
 }
 async function copyCode() {
@@ -89,7 +89,7 @@ function setWager(value: number) {
   const integer = Math.floor(value)
   wager.value = Math.max(Math.min(minimumTarget.value, maximumTarget.value), Math.min(maximumTarget.value, integer))
 }
-function applyIncoming(incoming: RoomState) {
+function applyIncoming(incoming: PokerRoomState) {
   if (incoming.status === 'CLOSED' || incoming.table.version >= room.value.table.version) room.value = incoming
   if (incoming.status === 'CLOSED' || (pendingVersion.value !== null && incoming.table.version > pendingVersion.value)) {
     actionPending.value = false

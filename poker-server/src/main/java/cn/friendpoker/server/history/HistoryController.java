@@ -31,7 +31,7 @@ public class HistoryController {
         Long total = jdbc.queryForObject("select count(*) from hand_record_players where username = ?",
                 Long.class, principal.getName());
         List<HistoryItem> items = jdbc.query("""
-                select h.id, h.room_id, h.room_name, h.hand_number, h.summary, h.completed_at
+                select h.id, h.room_id, h.room_name, h.hand_number, h.summary, h.completed_at, h.game_type
                 from hand_records h join hand_record_players p on p.hand_id = h.id
                 where p.username = ? order by h.completed_at desc limit ? offset ?
                 """, this::map, principal.getName(), size, page * size);
@@ -43,7 +43,7 @@ public class HistoryController {
     @GetMapping("/{handId}")
     public HistoryItem detail(@PathVariable String handId, Principal principal) {
         List<HistoryItem> records = jdbc.query("""
-                select h.id, h.room_id, h.room_name, h.hand_number, h.summary, h.completed_at
+                select h.id, h.room_id, h.room_name, h.hand_number, h.summary, h.completed_at, h.game_type
                 from hand_records h join hand_record_players p on p.hand_id = h.id
                 where h.id = ? and p.username = ?
                 """, this::map, handId, principal.getName());
@@ -54,10 +54,10 @@ public class HistoryController {
     private HistoryItem map(ResultSet rs, int row) throws SQLException {
         return new HistoryItem(rs.getString("id"), rs.getString("room_id"), rs.getString("room_name"),
                 rs.getLong("hand_number"), rs.getString("summary"),
-                rs.getTimestamp("completed_at").toInstant());
+                rs.getTimestamp("completed_at").toInstant(), rs.getString("game_type"));
     }
 
     public record HistoryItem(String id, String roomId, String roomName, long handNumber,
-                              String summary, Instant completedAt) {}
+                              String summary, Instant completedAt, String gameType) {}
     public record HistoryPage(List<HistoryItem> items, int page, int size, long totalElements, int totalPages) {}
 }

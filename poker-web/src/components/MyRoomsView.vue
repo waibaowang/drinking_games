@@ -28,9 +28,9 @@ onMounted(load)
     <div v-if="loading" class="empty-state panel">正在加载你的牌局…</div>
     <div v-else-if="rooms.length" class="room-grid">
       <article v-for="room in rooms" :key="room.id" class="room-card panel">
-        <div class="room-card-top"><span class="status-dot"></span><span>{{ room.recovered ? '已从服务器恢复' : '进行中' }}</span><strong>#{{ room.code }}</strong></div>
+        <div class="room-card-top"><span class="status-dot"></span><span>{{ room.gameType === 'FLIGHT' ? '飞行棋' : '德州扑克' }} · {{ room.recovered ? '已恢复' : '进行中' }}</span><strong>#{{ room.code }}</strong></div>
         <h3>{{ room.name }}</h3>
-        <div class="room-stats"><span><small>盲注</small>{{ room.smallBlind }} / {{ room.bigBlind }}</span><span><small>成员</small>{{ room.members }} / {{ room.maxPlayers }}</span></div>
+        <div class="room-stats"><span><small>{{ room.gameType === 'FLIGHT' ? '模式' : '盲注' }}</small>{{ room.gameType === 'FLIGHT' ? '无时限' : `${room.smallBlind} / ${room.bigBlind}` }}</span><span><small>成员</small>{{ room.members }} / {{ room.maxPlayers }}</span></div>
         <button class="secondary full" @click="enter(room.id)">返回牌桌</button>
       </article>
     </div>

@@ -1,6 +1,7 @@
 package cn.friendpoker.server.room;
 
 import cn.friendpoker.domain.game.TableConfig;
+import cn.friendpoker.server.flight.FlightRoomStore;
 import jakarta.annotation.PostConstruct;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -10,6 +11,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -20,10 +22,12 @@ public class RoomService {
     private final SecureRandom random = new SecureRandom();
     private final PasswordEncoder passwordEncoder;
     private final RoomStore store;
+    private final FlightRoomStore flightStore;
 
-    public RoomService(PasswordEncoder passwordEncoder, RoomStore store) {
+    public RoomService(PasswordEncoder passwordEncoder, RoomStore store, FlightRoomStore flightStore) {
         this.passwordEncoder = passwordEncoder;
         this.store = store;
+        this.flightStore = flightStore;
     }
 
     @PostConstruct
@@ -74,6 +78,14 @@ public class RoomService {
         return room;
     }
 
+    public Optional<PokerRoom> find(UUID id) { return Optional.ofNullable(rooms.get(id)); }
+
+    public Optional<PokerRoom> findByCode(String code) {
+        String cleaned = code == null ? "" : code.trim();
+        return rooms.values().stream().filter(candidate -> candidate.status() == RoomStatus.ACTIVE)
+                .filter(candidate -> candidate.code().equalsIgnoreCase(cleaned)).findFirst();
+    }
+
     public PokerRoom requireMember(UUID id, String username) {
         PokerRoom room = get(id);
         if (!room.hasMember(username)) throw new IllegalArgumentException("你还没有加入这个房间");
@@ -99,7 +111,7 @@ public class RoomService {
     public RoomStore store() { return store; }
 
     private RoomSummary summary(PokerRoom room) {
-        return new RoomSummary(room.id(), room.code(), room.name(), room.passwordHash() != null,
+        return new RoomSummary(room.id(), GameType.POKER, room.code(), room.name(), room.passwordHash() != null,
                 room.members().size(), room.config().maxPlayers(), room.config().smallBlind(),
                 room.config().bigBlind(), room.status(), room.recovered());
     }
@@ -114,7 +126,7 @@ public class RoomService {
             StringBuilder builder = new StringBuilder(6);
             for (int i = 0; i < 6; i++) builder.append(CODE_ALPHABET[random.nextInt(CODE_ALPHABET.length)]);
             code = builder.toString().toUpperCase(Locale.ROOT);
-        } while (codeExists(code));
+        } while (codeExists(code) || flightStore.codeExists(code));
         return code;
     }
 

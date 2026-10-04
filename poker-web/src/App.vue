@@ -8,6 +8,7 @@ import HistoryView from './components/HistoryView.vue'
 import LobbyView from './components/LobbyView.vue'
 import MyRoomsView from './components/MyRoomsView.vue'
 import PokerTable from './components/PokerTable.vue'
+import FlightBoard from './components/FlightBoard.vue'
 import ProfileView from './components/ProfileView.vue'
 
 type Page = 'lobby' | 'games' | 'history' | 'profile' | 'admin'
@@ -78,7 +79,8 @@ onBeforeUnmount(() => { window.removeEventListener('popstate', pop); window.remo
 <template>
   <div v-if="!ready" class="splash"><span class="brand-chip">H</span><p>正在准备牌桌…</p></div>
   <AuthPanel v-else-if="!user" @authenticated="authenticated" />
-  <PokerTable v-else-if="room" :initial-room="room" :user="user" @leave="leaveTable" />
+  <PokerTable v-else-if="room?.gameType === 'POKER'" :initial-room="room" :user="user" @leave="leaveTable" />
+  <FlightBoard v-else-if="room?.gameType === 'FLIGHT'" :initial-room="room" :user="user" @leave="leaveTable" />
   <main v-else class="app-shell shell">
     <header class="topbar app-header">
       <button class="wordmark plain-button" @click="navigate('lobby')"><span class="brand-chip small">H</span><span><strong>河牌会</strong><small>FRIENDS ONLY</small></span></button>

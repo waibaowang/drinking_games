@@ -8,6 +8,7 @@ import java.util.UUID;
 
 public record RoomState(
         UUID id,
+        GameType gameType,
         String code,
         String name,
         String hostUsername,

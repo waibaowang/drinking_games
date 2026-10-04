@@ -68,6 +68,20 @@ button:not(:disabled):hover { transform: translateY(-1px); filter: brightness(1.
 .lobby-hero { min-height: 330px; display: flex; align-items: center; justify-content: space-between; gap: 40px; }
 .lobby-hero h1 { font-size: clamp(44px, 6vw, 76px); }
 .create-button { padding: 15px 22px; }
+.game-choice-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; margin: -45px 0 22px; }
+.game-choice { min-height: 142px; padding: 24px; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 18px; color: var(--ink); text-align: left; border: 1px solid var(--line); border-radius: 20px; background: rgba(18,39,32,.72); box-shadow: 0 20px 50px rgba(0,0,0,.18); }
+.game-choice.selected { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(216,173,92,.12); }
+.game-choice-icon { width: 62px; height: 62px; display: grid; place-items: center; border-radius: 18px; font-size: 34px; background: rgba(255,255,255,.07); }
+.game-choice > span:nth-child(2) { display: grid; gap: 4px; }
+.game-choice small { color: var(--gold-bright); font-size: 10px; }
+.game-choice strong { font-size: 24px; }
+.game-choice em { color: var(--muted); font-size: 12px; font-style: normal; }
+.game-choice b { color: var(--gold); font-size: 12px; }
+.flight-choice { background: linear-gradient(135deg, rgba(28,70,78,.85), rgba(18,39,32,.78)); }
+.flight-create-grid { grid-template-columns: 1.4fr 1fr 2fr; }
+.flight-rule-summary { align-self: end; min-height: 44px; padding: 9px 12px; display: grid; gap: 2px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.035); }
+.flight-rule-summary strong { color: var(--gold-bright); font-size: 11px; }
+.flight-rule-summary span { color: var(--muted); font-size: 10px; }
 .create-panel { border-radius: 18px; padding: 26px; margin-bottom: 22px; }
 .form-grid { display: grid; grid-template-columns: 2fr 1.4fr repeat(3, 1fr); gap: 16px; margin: 22px 0; }
 .join-strip { display: grid; grid-template-columns: 1fr 150px 180px auto; gap: 12px; align-items: center; padding: 18px 20px; border-radius: 16px; }
@@ -199,13 +213,49 @@ button:not(:disabled):hover { transform: translateY(-1px); filter: brightness(1.
 .status-spinner { width: 24px; height: 24px; display: inline-block; border: 3px solid rgba(255,255,255,.2); border-top-color: var(--gold); border-radius: 50%; animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+.flight-brand { background: #8bd3dd; }
+.flight-layout { grid-template-columns: minmax(560px, 1fr) 300px; }
+.flight-board { padding: 12px; border-radius: 22px; background: linear-gradient(145deg, rgba(15,52,47,.94), rgba(9,30,27,.94)); }
+.flight-board svg { width: 100%; max-height: calc(100vh - 235px); min-height: 500px; display: block; filter: drop-shadow(0 24px 30px rgba(0,0,0,.25)); }
+.flight-board-bg { fill: #edf0df; stroke: #b89b64; stroke-width: 1.5; }
+.track-cell { stroke: rgba(39,40,35,.42); stroke-width: .45; opacity: .72; }
+.home-cell { stroke: rgba(39,40,35,.55); stroke-width: .5; opacity: .85; }
+.flight-center { fill: #173e34; stroke: #c6a967; stroke-width: 1; }
+.flight-center-text { fill: #e9d7a7; font-size: 2.5px; font-weight: 800; letter-spacing: .3px; }
+.board-item circle { fill: #714c95; stroke: #f4d982; stroke-width: .75; animation: itemGlow 1.5s ease-in-out infinite alternate; }
+.board-item text { fill: white; font-size: 4px; font-weight: 900; }
+@keyframes itemGlow { to { filter: drop-shadow(0 0 2px #d9b8ff); } }
+.flight-piece { cursor: default; }
+.flight-piece circle { stroke: white; stroke-width: .65; filter: drop-shadow(0 1px 1px rgba(0,0,0,.55)); }
+.flight-piece text { fill: #15211d; font-size: 2.6px; font-weight: 900; pointer-events: none; }
+.flight-piece.movable { cursor: pointer; animation: piecePulse .75s ease-in-out infinite alternate; }
+.flight-piece.movable circle { stroke: #fff7b2; stroke-width: 1.15; }
+@keyframes piecePulse { to { filter: drop-shadow(0 0 3px #ffe36e); transform: scale(1.15); } }
+.flight-player-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; padding: 4px; }
+.flight-player { min-width: 0; padding: 8px; display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: 6px; border: 1px solid var(--line); border-radius: 9px; background: rgba(0,0,0,.12); }
+.flight-player.current { border-color: var(--gold); background: rgba(216,173,92,.08); }
+.flight-player.empty { opacity: .6; }
+.flight-player strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.flight-player small { grid-column: 2; color: var(--muted); font-size: 8px; }
+.color-dot { width: 9px; height: 9px; grid-row: span 2; border-radius: 50%; }
+.flight-actions { margin-top: 10px; }
+.color-seat-button { padding: 9px 14px; color: var(--ink); border: 1px solid var(--seat-color); border-radius: 9px; background: color-mix(in srgb, var(--seat-color) 24%, transparent); font-weight: 800; }
+.dice { width: 50px; height: 50px; display: grid; place-items: center; color: #1c211f; border-radius: 12px; background: #f4f0df; box-shadow: 0 7px 18px rgba(0,0,0,.25); font-size: 38px; line-height: 1; }
+.dice.rolling { animation: diceShake .35s linear infinite; }
+@keyframes diceShake { 50% { transform: rotate(10deg) scale(.94); } }
+.roll-button { min-width: 130px; }
+.item-rule { color: #8f9f98; font-size: 9px; line-height: 1.6; }
+
 @media (max-width: 1050px) {
   .auth-layout { gap: 40px; }
   .form-grid { grid-template-columns: repeat(3, 1fr); }
+  .flight-create-grid { grid-template-columns: 1fr 1fr; }
+  .flight-rule-summary { grid-column: 1 / -1; }
   .room-grid { grid-template-columns: repeat(2, 1fr); }
   .game-layout { grid-template-columns: 1fr; }
   .hand-log { height: 250px; min-height: 0; }
   .poker-table { min-height: 500px; }
+  .flight-board svg { max-height: none; }
 }
 
 @media (max-width: 720px) {
@@ -218,6 +268,7 @@ button:not(:disabled):hover { transform: translateY(-1px); filter: brightness(1.
   .app-header { flex-wrap: wrap; padding: 12px 0; }
   .app-nav { order: 3; width: 100%; overflow-x: auto; }
   .lobby-hero { min-height: 280px; display: grid; align-content: center; }
+  .game-choice-grid { grid-template-columns: 1fr; margin-top: -28px; }
   .form-grid { grid-template-columns: repeat(2, 1fr); }
   .join-strip { grid-template-columns: 1fr 1fr; }
   .join-strip > div { grid-column: 1 / -1; }
@@ -240,16 +291,24 @@ button:not(:disabled):hover { transform: translateY(-1px); filter: brightness(1.
   .wager-control input[type='range'] { flex: 1; }
   .wager-control .primary { flex: 1; }
   .hand-log { display: flex; height: 320px; }
+  .flight-board { padding: 5px; }
+  .flight-board svg { min-height: 390px; }
+  .flight-player-strip { grid-template-columns: repeat(2, 1fr); }
+  .flight-actions { flex-wrap: wrap; }
   .history-layout, .settings-grid, .admin-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 430px) {
   .lobby-hero h1 { font-size: 43px; }
   .form-grid { grid-template-columns: 1fr; }
+  .game-choice { grid-template-columns: auto 1fr; padding: 18px; }
+  .game-choice b { display: none; }
+  .game-choice-icon { width: 50px; height: 50px; }
   .join-strip { grid-template-columns: 1fr; }
   .join-strip > div { grid-column: auto; }
   .game-topbar .wordmark strong { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .poker-table { min-height: 480px; }
+  .flight-board svg { min-height: 335px; }
   .player-seat { min-width: 78px; }
   .playing-card, .card-slot { width: 38px; }
   .playing-card.compact { width: 31px; }

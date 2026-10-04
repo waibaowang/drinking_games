@@ -53,11 +53,11 @@ run_scenario() {
   done
   version=$(docker exec "poker-check-pg-$STAMP" psql -At -U poker -d poker \
     -c 'select max(version) from flyway_schema_history where success')
-  test "$version" = "3"
+  test "$version" = "4"
   if [ "$mode" = upgrade ]; then
     retained=$(docker exec "poker-check-pg-$STAMP" psql -At -U poker -d poker -c \
-      "select role || ':' || enabled || ':' || (select room_name from hand_records where id='h1') from user_accounts where id='u1'")
-    test "$retained" = "PLAYER:true:旧牌局"
+      "select role || ':' || enabled || ':' || (select room_name || ':' || game_type from hand_records where id='h1') from user_accounts where id='u1'")
+    test "$retained" = "PLAYER:true:旧牌局:POKER"
   fi
   docker rm -f "poker-check-app-$STAMP" "poker-check-pg-$STAMP" >/dev/null
   docker network rm "poker-check-$STAMP" >/dev/null

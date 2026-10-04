@@ -25,10 +25,20 @@ class MigrationUpgradeTest {
                 assertEquals(true, result.getBoolean(2));
                 assertEquals(0, result.getLong(3));
             }
-            try (var result = statement.executeQuery("select room_name from hand_records where id='h1'")) {
+            try (var result = statement.executeQuery("select room_name, game_type from hand_records where id='h1'")) {
                 result.next();
                 assertEquals("旧牌局", result.getString(1));
+                assertEquals("POKER", result.getString(2));
             }
+            assertEquals(1, scalar(statement, "select count(*) from information_schema.tables where table_name='flight_rooms'"));
+            assertEquals(1, scalar(statement, "select count(*) from information_schema.tables where table_name='flight_room_members'"));
+        }
+    }
+
+    private int scalar(java.sql.Statement statement, String sql) throws Exception {
+        try (var result = statement.executeQuery(sql)) {
+            result.next();
+            return result.getInt(1);
         }
     }
 }

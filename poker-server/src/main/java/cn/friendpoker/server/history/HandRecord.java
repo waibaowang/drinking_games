@@ -24,6 +24,8 @@ public class HandRecord {
     private Instant completedAt;
     @Column(name = "room_name", nullable = false, length = 64)
     private String roomName;
+    @Column(name = "game_type", nullable = false, length = 16)
+    private String gameType;
 
     protected HandRecord() {}
 
@@ -34,6 +36,7 @@ public class HandRecord {
         this.summary = summary;
         this.completedAt = Instant.now();
         this.roomName = roomName;
+        this.gameType = "POKER";
     }
 
     public String getId() { return id; }
@@ -42,4 +45,5 @@ public class HandRecord {
     public String getSummary() { return summary; }
     public Instant getCompletedAt() { return completedAt; }
     public String getRoomName() { return roomName; }
+    public String getGameType() { return gameType; }
 }

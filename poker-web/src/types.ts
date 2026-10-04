@@ -2,6 +2,7 @@ export type ActionType = 'FOLD' | 'CHECK' | 'CALL' | 'BET' | 'RAISE' | 'ALL_IN'
 export type Street = 'WAITING' | 'SHUFFLE_PENDING' | 'PREFLOP' | 'FLOP' | 'TURN' | 'RIVER' | 'COMPLETE'
 export type UserRole = 'ADMIN' | 'PLAYER'
 export type RoomStatus = 'ACTIVE' | 'CLOSED'
+export type GameType = 'POKER' | 'FLIGHT'
 
 export interface UserView { username: string; displayName: string; role: UserRole; enabled: boolean }
 export interface Card { rank: string; suit: string }
@@ -40,8 +41,9 @@ export interface TableConfig {
   maxPlayers: number
   actionSeconds: number
 }
-export interface RoomState {
+export interface PokerRoomState {
   id: string
+  gameType: 'POKER'
   code: string
   name: string
   hostUsername: string
@@ -51,8 +53,36 @@ export interface RoomState {
   status: RoomStatus
   recovered: boolean
 }
+export type FlightPhase = 'WAITING' | 'ROLL' | 'MOVE' | 'COMPLETE'
+export interface FlightBoardItem { id: number; type: string; cellIndex: number; spawnRound: number; expiresAtRound: number }
+export interface FlightPlayerSnapshot { id: string; name: string; seat: number; pieces: number[]; turn: boolean }
+export interface FlightSnapshot {
+  version: number
+  gameNumber: number
+  roundNumber: number
+  phase: FlightPhase
+  currentSeat: number | null
+  lastRoll: number | null
+  legalPieceIndexes: number[]
+  players: FlightPlayerSnapshot[]
+  boardItems: FlightBoardItem[]
+  messages: string[]
+  winnerId: string | null
+}
+export interface FlightRoomState {
+  id: string
+  gameType: 'FLIGHT'
+  code: string
+  name: string
+  hostUsername: string
+  game: FlightSnapshot
+  status: RoomStatus
+  recovered: boolean
+}
+export type RoomState = PokerRoomState | FlightRoomState
 export interface RoomSummary {
   id: string
+  gameType: GameType
   code: string
   name: string
   locked: boolean
@@ -70,6 +100,7 @@ export interface HistoryItem {
   handNumber: number
   summary: string
   completedAt: string
+  gameType: GameType
 }
 export interface HistoryPage {
   items: HistoryItem[]

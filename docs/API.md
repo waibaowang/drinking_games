@@ -12,7 +12,8 @@
 | POST | `/api/auth/logout` | 登录 | 退出 |
 | PATCH | `/api/profile` | 登录 | 修改昵称 |
 | POST | `/api/profile/password` | 登录 | 验证当前密码后修改密码 |
-| POST | `/api/rooms` | 登录 | 创建私人房间 |
+| POST | `/api/rooms` | 登录 | 创建德州扑克私人房间 |
+| POST | `/api/rooms/flight` | 登录 | 创建飞行棋私人房间 |
 | POST | `/api/rooms/join` | 登录 | 凭邀请码和可选密码加入 |
 | GET | `/api/rooms/mine` | 登录 | 自己加入过的活跃房间 |
 | GET | `/api/rooms/{id}` | 成员 | 获取自己的脱敏牌桌视图 |
@@ -57,3 +58,16 @@
 ```
 
 `amount` 是本轮累计下注目标。重复 `actionId` 不再执行，即使携带旧版本也只返回最新状态。
+
+飞行棋发送地址为 `/app/flight/rooms/{roomId}/action`，私有状态和聊天订阅分别为
+`/user/queue/flight-rooms/{roomId}` 与 `/user/queue/flight-rooms/{roomId}/chat`。掷骰和移动消息示例：
+
+```json
+{ "actionId": "唯一 ID", "action": "ROLL", "pieceIndex": null, "version": 12 }
+```
+
+```json
+{ "actionId": "唯一 ID", "action": "MOVE", "pieceIndex": 2, "version": 13 }
+```
+
+飞行棋没有行动截止时间。`version` 和 `actionId` 的并发、过期和重复消息语义与德州一致。

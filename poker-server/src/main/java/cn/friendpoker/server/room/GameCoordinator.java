@@ -288,7 +288,7 @@ public class GameCoordinator {
     }
 
     private RoomState toState(PokerRoom room, String viewer) {
-        return new RoomState(room.id(), room.code(), room.name(), room.hostUsername(), room.config(),
+        return new RoomState(room.id(), GameType.POKER, room.code(), room.name(), room.hostUsername(), room.config(),
                 room.table().snapshotFor(viewer), room.actionDeadline(), room.status(), room.recovered());
     }
 
