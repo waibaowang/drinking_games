@@ -9,6 +9,8 @@ import cn.friendpoker.server.user.UserRole;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.ConcurrencyFailureException;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.util.UUID;
@@ -27,6 +29,7 @@ class FlightRoomPersistenceTest {
     @Autowired FlightCoordinator games;
     @Autowired UserAccountRepository users;
     @Autowired PasswordEncoder passwords;
+    @Autowired JdbcTemplate jdbc;
 
     @Test
     void persistsFlightStateAndDeduplicatesActions() {
@@ -60,5 +63,28 @@ class FlightRoomPersistenceTest {
         assertThrows(IllegalArgumentException.class,
                 () -> games.act(room.id(), host, "after-close", "ROLL", null,
                         room.game().snapshotFor(host).version()));
+    }
+
+    @Test
+    void databaseConflictDoesNotAdvanceTheInMemoryGame() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String host = "flight_db_" + suffix;
+        String guest = "flight_db_guest_" + suffix;
+        users.save(new UserAccount(host, passwords.encode("password123"), "Host", UserRole.PLAYER));
+        users.save(new UserAccount(guest, passwords.encode("password123"), "Guest", UserRole.PLAYER));
+
+        FlightRoom room = rooms.create(host, new CreateFlightRoomRequest("DB-first 测试", ""));
+        rooms.join(room.id(), guest, "");
+        games.sit(room.id(), host, "Host", 0);
+        games.sit(room.id(), guest, "Guest", 1);
+        games.start(room.id(), host);
+        FlightPersistenceState before = room.game().exportState();
+        long roomVersion = room.stateVersion();
+        jdbc.update("update flight_rooms set state_version = state_version + 1 where id = ?", room.id().toString());
+
+        assertThrows(ConcurrencyFailureException.class, () -> games.act(room.id(), host, "db-conflict", "ROLL",
+                null, before.version()));
+        assertEquals(before, room.game().exportState());
+        assertEquals(roomVersion, room.stateVersion());
     }
 }

@@ -54,6 +54,33 @@ run_scenario() {
   version=$(docker exec "poker-check-pg-$STAMP" psql -At -U poker -d poker \
     -c 'select max(version) from flyway_schema_history where success')
   test "$version" = "4"
+
+  docker exec "poker-check-pg-$STAMP" psql -v ON_ERROR_STOP=1 -U poker -d poker -c \
+    "insert into user_accounts
+       (id, username, password_hash, display_name, created_at)
+     values
+       ('flight-check-user', 'flight_check', 'hash', 'Flight Check', current_timestamp);
+     insert into flight_rooms
+       (id, code, name, host_username, status, state_json, state_version, created_at, updated_at)
+     values
+       ('flight-check-room', 'FLY123', 'Flight Check', 'flight_check', 'ACTIVE', '{}', 0,
+        current_timestamp, current_timestamp);
+     insert into flight_room_members (room_id, username, joined_at)
+     values ('flight-check-room', 'flight_check', current_timestamp);
+     insert into hand_records
+       (id, room_id, hand_number, summary, completed_at, room_name, game_type)
+     values
+       ('flight-check-hand', 'flight-check-room', 1, 'Flight result', current_timestamp,
+        'Flight Check', 'FLIGHT');
+     insert into hand_record_players (hand_id, username)
+     values ('flight-check-hand', 'flight_check');" >/dev/null
+  flight_smoke=$(docker exec "poker-check-pg-$STAMP" psql -At -U poker -d poker -c \
+    "select
+       (select count(*) from flight_rooms where id = 'flight-check-room') || ':' ||
+       (select count(*) from flight_room_members where room_id = 'flight-check-room') || ':' ||
+       (select count(*) from hand_record_players where hand_id = 'flight-check-hand') || ':' ||
+       (select game_type from hand_records where id = 'flight-check-hand')")
+  test "$flight_smoke" = "1:1:1:FLIGHT"
   if [ "$mode" = upgrade ]; then
     retained=$(docker exec "poker-check-pg-$STAMP" psql -At -U poker -d poker -c \
       "select role || ':' || enabled || ':' || (select room_name || ':' || game_type from hand_records where id='h1') from user_accounts where id='u1'")

@@ -77,7 +77,7 @@ onBeforeUnmount(() => { window.removeEventListener('popstate', pop); window.remo
 </script>
 
 <template>
-  <div v-if="!ready" class="splash"><span class="brand-chip">H</span><p>正在准备牌桌…</p></div>
+  <div v-if="!ready" class="splash"><span class="brand-chip">H</span><p>正在准备游戏…</p></div>
   <AuthPanel v-else-if="!user" @authenticated="authenticated" />
   <PokerTable v-else-if="room?.gameType === 'POKER'" :initial-room="room" :user="user" @leave="leaveTable" />
   <FlightBoard v-else-if="room?.gameType === 'FLIGHT'" :initial-room="room" :user="user" @leave="leaveTable" />

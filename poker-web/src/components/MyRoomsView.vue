@@ -16,7 +16,7 @@ async function load() {
 }
 async function enter(id: string) {
   try { emit('enter', await api<RoomState>(`/api/rooms/${id}`)) }
-  catch (cause) { error.value = cause instanceof Error ? cause.message : '无法进入牌桌' }
+  catch (cause) { error.value = cause instanceof Error ? cause.message : '无法进入游戏' }
 }
 onMounted(load)
 </script>
@@ -28,12 +28,12 @@ onMounted(load)
     <div v-if="loading" class="empty-state panel">正在加载你的牌局…</div>
     <div v-else-if="rooms.length" class="room-grid">
       <article v-for="room in rooms" :key="room.id" class="room-card panel">
-        <div class="room-card-top"><span class="status-dot"></span><span>{{ room.gameType === 'FLIGHT' ? '飞行棋' : '德州扑克' }} · {{ room.recovered ? '已恢复' : '进行中' }}</span><strong>#{{ room.code }}</strong></div>
+        <div class="room-card-top"><span class="status-dot" :class="{ closed: room.status === 'CLOSED' }"></span><span>{{ room.gameType === 'FLIGHT' ? '飞行棋' : '德州扑克' }} · {{ room.status === 'CLOSED' ? '已关闭' : room.recovered ? '已恢复' : '进行中' }}</span><strong>#{{ room.code }}</strong></div>
         <h3>{{ room.name }}</h3>
         <div class="room-stats"><span><small>{{ room.gameType === 'FLIGHT' ? '模式' : '盲注' }}</small>{{ room.gameType === 'FLIGHT' ? '无时限' : `${room.smallBlind} / ${room.bigBlind}` }}</span><span><small>成员</small>{{ room.members }} / {{ room.maxPlayers }}</span></div>
-        <button class="secondary full" @click="enter(room.id)">返回牌桌</button>
+        <button class="secondary full" @click="enter(room.id)">{{ room.status === 'CLOSED' ? '查看状态' : '返回游戏' }}</button>
       </article>
     </div>
-    <div v-else class="empty-state panel"><div class="empty-card">♠</div><h3>还没有进行中的牌局</h3><p>去大厅开一桌，或者凭朋友的邀请码加入。</p></div>
+    <div v-else class="empty-state panel"><div class="empty-card">◆</div><h3>还没有进行中的游戏</h3><p>去大厅开一局，或者凭朋友的邀请码加入。</p></div>
   </section>
 </template>

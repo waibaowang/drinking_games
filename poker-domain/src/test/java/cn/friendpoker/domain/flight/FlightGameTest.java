@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FlightGameTest {
@@ -69,6 +70,23 @@ class FlightGameTest {
 
         assertEquals(original.exportState(), restored.exportState());
         assertEquals(original.snapshotFor("alice"), restored.snapshotFor("alice"));
+    }
+
+    @Test
+    void rejectsSnapshotsThatCouldRestoreIntoAStuckGame() {
+        FlightPersistenceState invalidTurn = new FlightPersistenceState(
+                List.of(player("alice", 0, -1, -1, -1, -1), player("bob", 1, -1, -1, -1, -1)),
+                FlightPhase.MOVE, 3, 1, 1, 0, null, Set.of(), List.of(), 1, List.of(), null);
+        FlightPersistenceState invalidRound = new FlightPersistenceState(
+                invalidTurn.players(), FlightPhase.ROLL, 3, 1, 1, 0, 1, Set.of(0), List.of(), 1,
+                List.of(), null);
+        FlightPersistenceState invalidItemSequence = new FlightPersistenceState(
+                invalidTurn.players(), FlightPhase.ROLL, 3, 1, 2, 0, 1, Set.of(),
+                List.of(new FlightBoardItem(1, "MYSTERY", 10, 2, 5)), 1, List.of(), null);
+
+        assertThrows(IllegalArgumentException.class, () -> FlightGame.restore(invalidTurn));
+        assertThrows(IllegalArgumentException.class, () -> FlightGame.restore(invalidRound));
+        assertThrows(IllegalArgumentException.class, () -> FlightGame.restore(invalidItemSequence));
     }
 
     private FlightGame startedGame() {

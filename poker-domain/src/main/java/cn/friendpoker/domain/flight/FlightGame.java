@@ -148,9 +148,15 @@ public final class FlightGame {
 
     public static FlightGame restore(FlightPersistenceState state) {
         Objects.requireNonNull(state);
+        if (state.phase() == null || state.version() < 0 || state.gameNumber() < 0 || state.roundNumber() < 0
+                || state.nextItemId() < 1 || state.messages().size() > MESSAGE_LIMIT) {
+            throw new IllegalArgumentException("保存的飞行棋基础状态不合法");
+        }
         if (state.players().size() > MAX_PLAYERS
                 || state.players().stream().map(FlightPlayerSnapshot::seat).distinct().count() != state.players().size()
-                || state.players().stream().map(FlightPlayerSnapshot::id).distinct().count() != state.players().size()) {
+                || state.players().stream().map(FlightPlayerSnapshot::id).distinct().count() != state.players().size()
+                || state.players().stream().anyMatch(player -> player.id() == null || player.id().isBlank()
+                || player.name() == null || player.name().isBlank())) {
             throw new IllegalArgumentException("保存的飞行棋玩家不合法");
         }
         if (state.players().stream().anyMatch(player -> player.seat() < 0 || player.seat() >= MAX_PLAYERS
@@ -164,11 +170,34 @@ public final class FlightGame {
         if (state.lastRoll() != null && (state.lastRoll() < 1 || state.lastRoll() > 6)) {
             throw new IllegalArgumentException("保存的骰子点数不合法");
         }
+        Set<Integer> occupiedSeats = state.players().stream().map(FlightPlayerSnapshot::seat)
+                .collect(java.util.stream.Collectors.toSet());
+        if (!occupiedSeats.containsAll(state.completedSeats())
+                || state.currentSeat() != null && state.completedSeats().contains(state.currentSeat())) {
+            throw new IllegalArgumentException("保存的轮次进度不合法");
+        }
+        boolean active = state.phase() == FlightPhase.ROLL || state.phase() == FlightPhase.MOVE;
+        if (active && (state.players().size() < 2 || state.currentSeat() == null
+                || state.gameNumber() < 1 || state.roundNumber() < 1 || state.winnerId() != null)
+                || state.phase() == FlightPhase.MOVE && state.lastRoll() == null
+                || !active && state.currentSeat() != null
+                || state.phase() == FlightPhase.WAITING && (state.gameNumber() != 0 || state.roundNumber() != 0
+                || state.lastRoll() != null || state.winnerId() != null || !state.completedSeats().isEmpty()
+                || !state.boardItems().isEmpty())
+                || state.phase() == FlightPhase.COMPLETE && (state.gameNumber() < 1 || state.roundNumber() < 1
+                || state.winnerId() == null || state.winnerId().isBlank())) {
+            throw new IllegalArgumentException("保存的飞行棋阶段不合法");
+        }
+        long greatestItemId = state.boardItems().stream().mapToLong(FlightBoardItem::id).max().orElse(0);
         if (state.boardItems().size() > MAX_ITEMS
                 || state.boardItems().stream().map(FlightBoardItem::id).distinct().count() != state.boardItems().size()
                 || state.boardItems().stream().map(FlightBoardItem::cellIndex).distinct().count() != state.boardItems().size()
-                || state.boardItems().stream().anyMatch(item -> item.cellIndex() < 0 || item.cellIndex() >= TRACK_SIZE
-                || item.expiresAtRound() <= item.spawnRound())) {
+                || state.nextItemId() <= greatestItemId
+                || state.boardItems().stream().anyMatch(item -> item.id() < 1 || !"MYSTERY".equals(item.type())
+                || item.cellIndex() < 0 || item.cellIndex() >= TRACK_SIZE || item.spawnRound() < 2
+                || item.spawnRound() % ITEM_SPAWN_INTERVAL != 0
+                || item.expiresAtRound() != item.spawnRound() + ITEM_LIFETIME_ROUNDS
+                || item.spawnRound() > state.roundNumber() || item.expiresAtRound() <= state.roundNumber())) {
             throw new IllegalArgumentException("保存的道具不合法");
         }
 

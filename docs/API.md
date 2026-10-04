@@ -16,10 +16,10 @@
 | POST | `/api/rooms/flight` | 登录 | 创建飞行棋私人房间 |
 | POST | `/api/rooms/join` | 登录 | 凭邀请码和可选密码加入 |
 | GET | `/api/rooms/mine` | 登录 | 自己加入过的活跃房间 |
-| GET | `/api/rooms/{id}` | 成员 | 获取自己的脱敏牌桌视图 |
-| POST | `/api/rooms/{id}/seats/{seat}` | 成员 | 入座 |
+| GET | `/api/rooms/{id}` | 成员 | 获取自己的游戏房间视图 |
+| POST | `/api/rooms/{id}/seats/{seat}` | 成员 | 入座；德州座位为 0～8，飞行棋颜色座位为 0～3 |
 | DELETE | `/api/rooms/{id}/seat` | 成员 | 离座 |
-| POST | `/api/rooms/{id}/start` | 房主 | 准备并开始下一手 |
+| POST | `/api/rooms/{id}/start` | 房主 | 开始下一手德州或下一局飞行棋 |
 | GET | `/api/history?page=0&size=20` | 登录 | 自己参与的历史分页 |
 | GET | `/api/history/{handId}` | 参与者 | 历史详情 |
 | GET/POST | `/api/admin/users` | 管理员 | 列出/创建玩家账号 |
@@ -71,3 +71,4 @@
 ```
 
 飞行棋没有行动截止时间。`version` 和 `actionId` 的并发、过期和重复消息语义与德州一致。
+道具状态随房间视图返回：第 1 轮不刷新，第 2、4、6……轮各刷新 2 个，每个连同生成轮停留 3 轮，同时最多 4 个。当前拾取只移除道具并记录提示，没有额外效果。

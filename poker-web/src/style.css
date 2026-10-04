@@ -97,6 +97,7 @@ button:not(:disabled):hover { transform: translateY(-1px); filter: brightness(1.
 .room-card-top { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 11px; }
 .room-card-top strong { margin-left: auto; color: var(--gold); letter-spacing: .12em; }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #48c68e; box-shadow: 0 0 8px #48c68e; }
+.status-dot.closed { background: #9a736f; box-shadow: none; }
 .room-card h3 { font-size: 20px; margin: 25px 0; }
 .room-stats { display: flex; gap: 32px; margin-bottom: 22px; }
 .room-stats span { display: grid; font-weight: 700; }
@@ -230,6 +231,8 @@ button:not(:disabled):hover { transform: translateY(-1px); filter: brightness(1.
 .flight-piece text { fill: #15211d; font-size: 2.6px; font-weight: 900; pointer-events: none; }
 .flight-piece.movable { cursor: pointer; animation: piecePulse .75s ease-in-out infinite alternate; }
 .flight-piece.movable circle { stroke: #fff7b2; stroke-width: 1.15; }
+.flight-piece.movable:focus { outline: none; }
+.flight-piece.movable:focus circle { stroke: #fff; stroke-width: 1.7; }
 @keyframes piecePulse { to { filter: drop-shadow(0 0 3px #ffe36e); transform: scale(1.15); } }
 .flight-player-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; padding: 4px; }
 .flight-player { min-width: 0; padding: 8px; display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: 6px; border: 1px solid var(--line); border-radius: 9px; background: rgba(0,0,0,.12); }
@@ -307,6 +310,10 @@ button:not(:disabled):hover { transform: translateY(-1px); filter: brightness(1.
   .join-strip { grid-template-columns: 1fr; }
   .join-strip > div { grid-column: auto; }
   .game-topbar .wordmark strong { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .flight-shell .game-topbar .wordmark { gap: 8px; }
+  .flight-shell .game-topbar .wordmark strong { max-width: 92px; }
+  .flight-shell .game-meta { gap: 7px; }
+  .flight-shell .game-meta .ghost { padding: 9px 10px; }
   .poker-table { min-height: 480px; }
   .flight-board svg { min-height: 335px; }
   .player-seat { min-width: 78px; }

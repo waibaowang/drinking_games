@@ -7,7 +7,9 @@
 - 分支：`main`
 - MVP 基线：`944ca25 chore: capture MVP baseline`
 - 第一轮完整实现：`7841d98 feat: formalize accounts rooms and recovery`
-- 第二轮复查修复：本文件所在提交，提交标题为 `fix: harden recovery security and operations`
+- 正式化第二轮复查：`c703e5f fix: harden recovery security and operations`
+- 飞行棋第一轮实现：`40ac018 feat: add persistent flight chess game`
+- 飞行棋第二轮复查：本文件所在提交，提交标题为 `fix: harden flight chess recovery and experience`。
 
 ## 第一轮：完整实现（已完成）
 
@@ -51,10 +53,26 @@ Ponytail 原则的影响：没有引入 Redis、消息队列、微服务、路�
 - 聊天不落库；登录会话不跨应用重启，重新登录后可继续恢复牌局。
 - 仅虚拟筹码，不支持充值、提现、抽水、现金结算或筹码交易。
 
-## 飞行棋扩展（进行中）
+## 飞行棋扩展（第二轮复查完成）
 
 - 需求：大厅选择飞行棋或德州；飞行棋 2～4 人、无行动时限、5/6 起飞、连续 6 不限次数。
 - 规则：撞机、同色跳跃、快捷航线、精确到达与越界反弹；完整状态可持久化恢复。
 - 道具：首轮不刷新，从第 2 轮开始每 2 轮刷新 2 个，保留 3 轮，同时最多 4 个；目前只有出现、拾取、过期，功能效果待后续添加。
 - 持久化：Flyway V4 新增 `flight_rooms`、`flight_room_members`，历史表增加 `game_type`。
-- 当前验证：领域测试 18 项、服务测试 11 项通过；Vue TypeScript 与生产构建通过。下一步为完整验证、运行时联调及复查提交。
+- 已保存检查点：上述第一轮代码均在 `40ac018`，即使额度中断也可从该提交恢复。提交前已通过领域测试 18 项、服务测试 11 项、Vue TypeScript 和生产构建。
+- 第二轮修复：异常快照恢复校验覆盖阶段、轮次、玩家和道具生命周期；数据库乐观锁冲突时验证内存状态不前进；前端修复邀请码被登录凭据自动填充、重连旧状态可操作和棋子键盘可访问性，并统一聚会游戏品牌和移动端布局。
+- 迁移复查：V4 为追加式迁移，V1～V3 历史默认标记为 `POKER`；`scripts/verify-postgres.sh` 要求版本为 4，并在全新库和 V1 升级库中实际读写飞行棋房间、成员及 `FLIGHT` 历史授权。
+
+### 第二轮验证结果
+
+- `scripts/verify.ps1` 全部通过：领域测试 19 项、服务测试 12 项、Maven 可执行 JAR、Vue TypeScript 和生产构建均成功。
+- 真实浏览器使用两个独立登录会话完成飞行棋建房、邀请码加入、选色、开局、掷骰和移动；进程中途重启后，重新登录自动回到原房间并恢复双方座位、棋子、当前玩家和日志；管理员关房提示和操作阻止正常。
+- 390×844 移动端检查无横向溢出；浏览器联调发现并修复邀请码/房间密码被登录凭据自动填充的问题。
+- Shell 脚本语法检查和 `git diff --check` 通过。当前机器没有 Docker，因此 PostgreSQL 容器级迁移验证仍需上线前在有 Docker 的环境执行。
+
+### 后续恢复顺序
+
+1. 先运行 `git status --short` 和 `git log --oneline -5`；保留任何新产生的未提交修改，不执行 reset 或 checkout 覆盖文件。
+2. 阅读本节确认最近检查点与已完成验证；若工作区干净，可直接从飞行棋第二轮提交继续下一项需求。
+3. 修改后仍运行 `scripts/verify.ps1` 和 `git diff --check`；迁移变化还需运行 `sh -n scripts/*.sh`，有 Docker 时运行 `sh scripts/verify-postgres.sh`。
+4. 后续道具效果必须保持现有刷新约束：第 1 轮为 0 个，第 2、4、6……轮各尝试刷新 2 个；每个连同生成轮停留 3 轮，同时最多 4 个。

@@ -49,12 +49,12 @@ async function joinRoom() {
       <div class="section-heading"><div><h2>新建{{ gameType === 'FLIGHT' ? '飞行棋房间' : '德州牌桌' }}</h2><p class="muted">创建后把六位邀请码发给朋友</p></div></div>
       <div v-if="gameType === 'FLIGHT'" class="form-grid flight-create-grid">
         <label>房间名称<input v-model.trim="flightForm.name" maxlength="30" /></label>
-        <label>房间密码（可选）<input v-model="flightForm.password" maxlength="32" type="password" /></label>
+        <label>房间密码（可选）<input v-model="flightForm.password" name="flight-room-password" maxlength="32" type="password" autocomplete="section-flight-room new-password" /></label>
         <div class="flight-rule-summary"><strong>聚会规则</strong><span>5 或 6 起飞 · 连续 6 不限次数 · 第二轮起每两轮刷新两个神秘道具</span></div>
       </div>
       <div v-else class="form-grid">
         <label>房间名称<input v-model.trim="form.name" maxlength="30" /></label>
-        <label>房间密码（可选）<input v-model="form.password" maxlength="32" type="password" /></label>
+        <label>房间密码（可选）<input v-model="form.password" name="poker-room-password" maxlength="32" type="password" autocomplete="section-poker-room new-password" /></label>
         <label>小盲<input v-model.number="form.smallBlind" type="number" min="1" /></label>
         <label>大盲<input v-model.number="form.bigBlind" type="number" :min="form.smallBlind * 2" /></label>
         <label>初始筹码<input v-model.number="form.initialStack" type="number" :min="form.bigBlind * 10" /></label>
@@ -63,13 +63,13 @@ async function joinRoom() {
       </div>
       <button class="primary" :disabled="busy" @click="createRoom">{{ busy ? '创建中…' : `创建${gameType === 'FLIGHT' ? '飞行棋房间' : '牌桌'}` }}</button>
     </section>
-    <section class="join-strip panel">
+    <form class="join-strip panel" autocomplete="off" @submit.prevent="joinRoom">
       <div><strong>收到朋友的邀请码？</strong><span class="muted">未加入过的私人桌不会公开显示</span></div>
-      <input v-model.trim="join.code" class="code-input" maxlength="6" placeholder="桌号" @input="join.code = join.code.toUpperCase()" />
-      <input v-model="join.password" type="password" placeholder="密码（如有）" />
-      <button class="secondary" :disabled="join.code.length !== 6 || busy" @click="joinRoom">加入</button>
-    </section>
+      <input v-model.trim="join.code" class="code-input" name="room-invite-code" maxlength="6" placeholder="邀请码" autocomplete="section-join-room one-time-code" autocapitalize="characters" spellcheck="false" aria-label="六位邀请码" @input="join.code = join.code.toUpperCase()" />
+      <input v-model="join.password" name="room-join-password" type="password" maxlength="32" placeholder="密码（如有）" autocomplete="section-join-room new-password" aria-label="房间密码（如有）" />
+      <button class="secondary" :disabled="join.code.length !== 6 || busy">加入</button>
+    </form>
     <p v-if="error" class="error-banner">{{ error }}</p>
-    <div class="privacy-note panel"><span>♠</span><div><h3>私人游戏</h3><p>只有加入过的房间会出现在“我的牌局”，邀请码不会展示给其他账号。</p></div></div>
+    <div class="privacy-note panel"><span>◆</span><div><h3>私人游戏</h3><p>只有加入过的房间会出现在“我的牌局”，邀请码不会展示给其他账号。</p></div></div>
   </section>
 </template>

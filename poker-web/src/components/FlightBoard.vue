@@ -52,8 +52,14 @@ function piecePoint(player: FlightPlayerSnapshot, pieceIndex: number, progress: 
 }
 function playerAt(seat: number) { return room.value.game.players.find(player => player.seat === seat) }
 function isMovable(player: FlightPlayerSnapshot, piece: number) {
-  return player.id === props.user.username && myTurn.value && room.value.game.phase === 'MOVE'
+  return !actionPending.value && connected.value && room.value.status === 'ACTIVE'
+    && player.id === props.user.username && myTurn.value && room.value.game.phase === 'MOVE'
     && room.value.game.legalPieceIndexes.includes(piece)
+}
+function clearPending() {
+  actionPending.value = false
+  pendingVersion.value = null
+  window.clearTimeout(pendingTimer)
 }
 
 async function sit(seat: number) {
@@ -73,7 +79,7 @@ function act(action: 'ROLL' | 'MOVE', pieceIndex?: number) {
   actionPending.value = true
   pendingVersion.value = room.value.game.version
   window.clearTimeout(pendingTimer)
-  pendingTimer = window.setTimeout(refreshState, 6000)
+  pendingTimer = window.setTimeout(() => refreshState(true), 6000)
   client.publish({ destination: `/app/flight/rooms/${room.value.id}/action`, body: JSON.stringify({
     actionId: crypto.randomUUID(), action, pieceIndex, version: room.value.game.version,
   }) })
@@ -86,22 +92,21 @@ function sendChat() {
 }
 function showError(cause: unknown) {
   error.value = cause instanceof Error ? cause.message : '操作失败'
-  actionPending.value = false
-  pendingVersion.value = null
-  window.clearTimeout(pendingTimer)
-  if (error.value.includes('状态已变化')) refreshState()
+  clearPending()
+  if (error.value.includes('状态已变化')) refreshState(true)
   window.setTimeout(() => error.value = '', 4000)
 }
-async function refreshState() {
-  try { applyIncoming(await api<FlightRoomState>(`/api/rooms/${room.value.id}`)) }
+async function refreshState(settlePending = false) {
+  try {
+    applyIncoming(await api<FlightRoomState>(`/api/rooms/${room.value.id}`))
+    if (settlePending) clearPending()
+  }
   catch (cause) { showError(cause) }
 }
 function applyIncoming(incoming: FlightRoomState) {
   if (incoming.status === 'CLOSED' || incoming.game.version >= room.value.game.version) room.value = incoming
   if (incoming.status === 'CLOSED' || (pendingVersion.value !== null && incoming.game.version > pendingVersion.value)) {
-    actionPending.value = false
-    pendingVersion.value = null
-    window.clearTimeout(pendingTimer)
+    clearPending()
   }
 }
 async function copyCode() {
@@ -123,16 +128,16 @@ function connect() {
     brokerURL: `${scheme}://${location.host}/ws`, reconnectDelay: 3000,
     heartbeatIncoming: 10000, heartbeatOutgoing: 10000,
     onConnect: async () => {
-      connected.value = true
       client?.subscribe(`/user/queue/flight-rooms/${room.value.id}`, message => applyIncoming(JSON.parse(message.body)))
       client?.subscribe('/user/queue/errors', message => showError(new Error(JSON.parse(message.body).message)))
       client?.subscribe(`/user/queue/flight-rooms/${room.value.id}/chat`, message => {
         chats.value.push(JSON.parse(message.body)); if (chats.value.length > 50) chats.value.shift()
       })
-      await refreshState()
+      await refreshState(true)
+      connected.value = true
     },
-    onStompError: () => checkSession(),
-    onWebSocketClose: () => { connected.value = false; actionPending.value = false; checkSession() },
+    onStompError: () => { connected.value = false; checkSession() },
+    onWebSocketClose: () => { connected.value = false; checkSession() },
   })
   client.activate()
 }
@@ -153,7 +158,7 @@ onBeforeUnmount(() => { window.clearTimeout(pendingTimer); client?.deactivate() 
         <div v-if="room.recovered && !recoveryDismissed" class="notice-banner">服务器已恢复这局飞行棋，棋盘从保存点继续。<button @click="recoveryDismissed = true">知道了</button></div>
         <div v-if="notice" class="notice-banner commitment">{{ notice }}</div>
         <div class="flight-board panel">
-          <svg viewBox="0 0 100 100" role="img" aria-label="飞行棋棋盘">
+          <svg viewBox="0 0 100 100" role="group" aria-label="飞行棋棋盘">
             <circle cx="50" cy="50" r="46" class="flight-board-bg" />
             <circle v-for="(point, index) in track" :key="`track-${index}`" :cx="point.x" :cy="point.y" r="2.35" class="track-cell" :style="{ fill: colors[index % 4] }" />
             <g v-for="seat in 4" :key="`home-${seat - 1}`">
@@ -162,10 +167,10 @@ onBeforeUnmount(() => { window.clearTimeout(pendingTimer); client?.deactivate() 
             <circle cx="50" cy="50" r="7" class="flight-center" />
             <text x="50" y="52" text-anchor="middle" class="flight-center-text">HOME</text>
             <g v-for="item in room.game.boardItems" :key="`item-${item.id}`" class="board-item" :transform="`translate(${track[item.cellIndex].x} ${track[item.cellIndex].y})`">
-              <circle r="3.3" /><text y="1.4" text-anchor="middle">?</text>
+              <title>神秘道具，还可停留 {{ Math.max(0, item.expiresAtRound - room.game.roundNumber) }} 轮</title><circle r="3.3" /><text y="1.4" text-anchor="middle">?</text>
             </g>
             <template v-for="player in room.game.players" :key="player.id">
-              <g v-for="(progress, pieceIndex) in player.pieces" :key="`${player.id}-${pieceIndex}`" class="flight-piece" :class="{ movable: isMovable(player, pieceIndex) }" :transform="`translate(${piecePoint(player, pieceIndex, progress).x} ${piecePoint(player, pieceIndex, progress).y})`" :role="isMovable(player, pieceIndex) ? 'button' : undefined" :tabindex="isMovable(player, pieceIndex) ? 0 : undefined" @click="isMovable(player, pieceIndex) && act('MOVE', pieceIndex)" @keydown.enter="isMovable(player, pieceIndex) && act('MOVE', pieceIndex)">
+              <g v-for="(progress, pieceIndex) in player.pieces" :key="`${player.id}-${pieceIndex}`" class="flight-piece" :class="{ movable: isMovable(player, pieceIndex) }" :transform="`translate(${piecePoint(player, pieceIndex, progress).x} ${piecePoint(player, pieceIndex, progress).y})`" :role="isMovable(player, pieceIndex) ? 'button' : undefined" :tabindex="isMovable(player, pieceIndex) ? 0 : undefined" :aria-label="isMovable(player, pieceIndex) ? `${player.name}的${pieceIndex + 1}号飞机，移动${room.game.lastRoll}格` : undefined" @click="isMovable(player, pieceIndex) && act('MOVE', pieceIndex)" @keydown.enter.prevent="isMovable(player, pieceIndex) && act('MOVE', pieceIndex)" @keydown.space.prevent="isMovable(player, pieceIndex) && act('MOVE', pieceIndex)">
                 <circle r="2.5" :style="{ fill: colors[player.seat] }" /><text y="1" text-anchor="middle">{{ pieceIndex + 1 }}</text>
               </g>
             </template>

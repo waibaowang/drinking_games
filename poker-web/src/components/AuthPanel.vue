@@ -24,14 +24,14 @@ async function submit() {
 <template>
   <main class="auth-layout">
     <section class="auth-intro">
-      <p class="eyebrow">PRIVATE TEXAS HOLD'EM</p>
-      <h1>今晚，<br />河牌见。</h1>
-      <p>开一张只属于朋友的桌。没有充值，没有陌生人，只有筹码、判断和一点点运气。</p>
-      <div class="feature-row"><span>2—9人</span><span>实时牌桌</span><span>私人房间</span></div>
+      <p class="eyebrow">PRIVATE GAME NIGHT</p>
+      <h1>今晚，<br />一起开局。</h1>
+      <p>开一个只属于朋友的房间。人少玩飞行棋，人多开德州，没有陌生人，只有笑声、判断和一点点运气。</p>
+      <div class="feature-row"><span>2—9人</span><span>实时游戏</span><span>私人房间</span></div>
     </section>
     <section class="auth-card panel">
       <div class="brand-chip">H</div>
-      <h2>回到牌桌</h2>
+      <h2>回到游戏</h2>
       <p class="muted">账号由管理员创建，请使用分配给你的账号登录</p>
       <form @submit.prevent="submit">
         <label>用户名<input v-model.trim="form.username" required autocomplete="username" /></label>
