@@ -46,5 +46,21 @@ public final class Deck {
     public int remaining() {
         return cards.size() - cursor;
     }
-}
 
+    public List<Card> cards() {
+        return cards;
+    }
+
+    public int cursor() {
+        return cursor;
+    }
+
+    public static Deck restore(List<Card> cards, int cursor) {
+        Deck deck = new Deck(cards);
+        if (cursor < 0 || cursor > cards.size()) {
+            throw new IllegalArgumentException("Invalid deck cursor");
+        }
+        deck.cursor = cursor;
+        return deck;
+    }
+}

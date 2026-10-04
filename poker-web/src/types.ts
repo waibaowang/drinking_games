@@ -1,7 +1,9 @@
 export type ActionType = 'FOLD' | 'CHECK' | 'CALL' | 'BET' | 'RAISE' | 'ALL_IN'
-export type Street = 'WAITING' | 'PREFLOP' | 'FLOP' | 'TURN' | 'RIVER' | 'COMPLETE'
+export type Street = 'WAITING' | 'SHUFFLE_PENDING' | 'PREFLOP' | 'FLOP' | 'TURN' | 'RIVER' | 'COMPLETE'
+export type UserRole = 'ADMIN' | 'PLAYER'
+export type RoomStatus = 'ACTIVE' | 'CLOSED'
 
-export interface UserView { username: string; displayName: string }
+export interface UserView { username: string; displayName: string; role: UserRole; enabled: boolean }
 export interface Card { rank: string; suit: string }
 export interface PlayerSnapshot {
   id: string
@@ -46,6 +48,8 @@ export interface RoomState {
   config: TableConfig
   table: TableSnapshot
   actionDeadline: string | null
+  status: RoomStatus
+  recovered: boolean
 }
 export interface RoomSummary {
   id: string
@@ -56,4 +60,21 @@ export interface RoomSummary {
   maxPlayers: number
   smallBlind: number
   bigBlind: number
+  status: RoomStatus
+  recovered: boolean
+}
+export interface HistoryItem {
+  id: string
+  roomId: string
+  roomName: string
+  handNumber: number
+  summary: string
+  completedAt: string
+}
+export interface HistoryPage {
+  items: HistoryItem[]
+  page: number
+  size: number
+  totalElements: number
+  totalPages: number
 }

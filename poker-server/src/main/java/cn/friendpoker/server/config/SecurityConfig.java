@@ -12,6 +12,7 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 
@@ -26,7 +27,10 @@ public class SecurityConfig {
     UserDetailsService userDetailsService(UserAccountRepository users) {
         return username -> users.findByUsernameIgnoreCase(username)
                 .map(account -> User.withUsername(account.getUsername())
-                        .password(account.getPasswordHash()).roles("PLAYER").build())
+                        .password(account.getPasswordHash())
+                        .roles(account.getRole().name())
+                        .disabled(!account.isEnabled())
+                        .build())
                 .orElseThrow(() -> new org.springframework.security.core.userdetails.UsernameNotFoundException("用户不存在"));
     }
 
@@ -36,7 +40,7 @@ public class SecurityConfig {
     }
 
     @Bean
-    SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    SecurityFilterChain securityFilterChain(HttpSecurity http, UserAccountRepository users) throws Exception {
         CookieCsrfTokenRepository csrf = CookieCsrfTokenRepository.withHttpOnlyFalse();
         csrf.setCookiePath("/");
         CsrfTokenRequestAttributeHandler requestHandler = new CsrfTokenRequestAttributeHandler();
@@ -45,7 +49,8 @@ public class SecurityConfig {
         return http
                 .csrf(configurer -> configurer.csrfTokenRepository(csrf).csrfTokenRequestHandler(requestHandler))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/auth/csrf", "/api/auth/register", "/api/auth/login", "/actuator/health").permitAll()
+                        .requestMatchers("/api/auth/csrf", "/api/auth/login", "/actuator/health").permitAll()
+                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 .exceptionHandling(errors -> errors.authenticationEntryPoint((request, response, exception) ->
                         response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "请先登录")))
@@ -53,7 +58,7 @@ public class SecurityConfig {
                 .formLogin(form -> form.disable())
                 .httpBasic(basic -> basic.disable())
                 .logout(logout -> logout.disable())
+                .addFilterAfter(new EnabledAccountFilter(users), UsernamePasswordAuthenticationFilter.class)
                 .build();
     }
 }
-

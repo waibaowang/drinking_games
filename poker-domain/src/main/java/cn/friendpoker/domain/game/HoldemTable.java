@@ -67,19 +67,21 @@ public final class HoldemTable {
     }
 
     public synchronized void startHand() {
-        CommittedDeck committed = FairShuffle.create();
-        shuffleCommitment = committed.commitment();
-        shuffleSeed = committed.seed();
-        startHandInternal(committed.deck());
+        prepareHand();
+        dealPreparedHand();
     }
 
     public synchronized void startHand(Deck shuffledDeck) {
-        shuffleCommitment = null;
-        shuffleSeed = null;
-        startHandInternal(shuffledDeck);
+        prepareHand(shuffledDeck, null, null);
+        dealPreparedHand();
     }
 
-    private void startHandInternal(Deck shuffledDeck) {
+    public synchronized void prepareHand() {
+        CommittedDeck committed = FairShuffle.create();
+        prepareHand(committed.deck(), committed.commitment(), committed.seed());
+    }
+
+    private void prepareHand(Deck shuffledDeck, String commitment, String seed) {
         requireBetweenHands();
         List<Integer> eligible = orderedSeats(player -> player.stack > 0);
         if (eligible.size() < 2) {
@@ -87,15 +89,28 @@ public final class HoldemTable {
         }
 
         this.deck = Objects.requireNonNull(shuffledDeck);
+        this.shuffleCommitment = commitment;
+        this.shuffleSeed = seed;
         board.clear();
         messages.clear();
         needsAction.clear();
         actedSinceFullRaise.clear();
         seats.values().forEach(PlayerState::prepareForHand);
-        handNumber++;
-        street = Street.PREFLOP;
+        actorSeat = null;
         currentBet = 0;
         minimumRaise = config.bigBlind();
+        handNumber++;
+        street = Street.SHUFFLE_PENDING;
+        messages.add("第 " + handNumber + " 手牌洗牌承诺已公布");
+        version++;
+    }
+
+    public synchronized void dealPreparedHand() {
+        if (street != Street.SHUFFLE_PENDING || deck == null) {
+            throw new GameRuleException("当前没有等待发牌的洗牌承诺");
+        }
+        List<Integer> eligible = orderedSeats(player -> player.stack > 0);
+        street = Street.PREFLOP;
         buttonSeat = nextSeat(buttonSeat, player -> player.status == PlayerStatus.ACTIVE);
 
         if (eligible.size() == 2) {
@@ -121,9 +136,50 @@ public final class HoldemTable {
         currentBet = config.bigBlind();
         orderedSeats(player -> player.status == PlayerStatus.ACTIVE).forEach(needsAction::add);
         actorSeat = needsAction.isEmpty() ? null : nextSeat(bigBlindSeat, player -> needsAction.contains(player.seat));
-        messages.add("第 " + handNumber + " 手牌开始");
+        messages.add("第 " + handNumber + " 手牌开始发牌");
         version++;
         progressWhenNobodyCanBet();
+    }
+
+    public synchronized TablePersistenceState exportState() {
+        List<PlayerPersistenceState> players = seats.values().stream()
+                .map(player -> new PlayerPersistenceState(player.id, player.name, player.seat, player.stack,
+                        player.committedStreet, player.committedHand, player.status, player.holeCards))
+                .toList();
+        return new TablePersistenceState(players, board, deck == null ? List.of() : deck.cards(),
+                deck == null ? 0 : deck.cursor(), street, version, handNumber, currentBet, minimumRaise,
+                buttonSeat, smallBlindSeat, bigBlindSeat, actorSeat, needsAction, actedSinceFullRaise,
+                messages, shuffleCommitment, shuffleSeed);
+    }
+
+    public static HoldemTable restore(TableConfig config, TablePersistenceState state) {
+        Objects.requireNonNull(state);
+        HoldemTable table = new HoldemTable(config);
+        for (PlayerPersistenceState saved : state.players()) {
+            PlayerState player = new PlayerState(saved.id(), saved.name(), saved.seat(), saved.stack());
+            player.committedStreet = saved.committedStreet();
+            player.committedHand = saved.committedHand();
+            player.status = saved.status();
+            player.holeCards.addAll(saved.holeCards());
+            table.seats.put(saved.seat(), player);
+        }
+        table.board.addAll(state.board());
+        table.deck = state.deck().isEmpty() ? null : Deck.restore(state.deck(), state.deckCursor());
+        table.street = state.street();
+        table.version = state.version();
+        table.handNumber = state.handNumber();
+        table.currentBet = state.currentBet();
+        table.minimumRaise = state.minimumRaise();
+        table.buttonSeat = state.buttonSeat();
+        table.smallBlindSeat = state.smallBlindSeat();
+        table.bigBlindSeat = state.bigBlindSeat();
+        table.actorSeat = state.actorSeat();
+        table.needsAction.addAll(state.needsAction());
+        table.actedSinceFullRaise.addAll(state.actedSinceFullRaise());
+        table.messages.addAll(state.messages());
+        table.shuffleCommitment = state.shuffleCommitment();
+        table.shuffleSeed = state.shuffleSeed();
+        return table;
     }
 
     public synchronized void act(String playerId, ActionType action, long amount, long expectedVersion) {

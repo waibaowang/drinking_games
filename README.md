@@ -1,51 +1,42 @@
 # 河牌会（Friend Poker）
 
-一个可以自行部署、与朋友通过浏览器游玩的无限注德州扑克项目。项目只提供虚拟筹码，不包含充值、提现、抽水或筹码交易。
+面向熟人圈、自行部署的无限注德州扑克 Web 应用。筹码仅用于娱乐，不支持充值、提现、抽水或交易。
 
-## 已实现
+## 现在具备的能力
 
-- 用户注册、登录、退出和会话认证
-- 创建私人房间、六位邀请码、可选房间密码
-- 2～9 人自由选座，房主开始下一手牌
-- 完整的翻牌前、翻牌、转牌、河牌和摊牌流程
-- 过牌、跟注、下注、加注、弃牌和 All-in
-- 主池、任意层边池、平分底池及奇数筹码
-- Heads-up 特殊盲注顺序和短码 All-in 加注权处理
-- 每桌串行处理指令、状态版本校验和重复/延迟操作防护
-- WebSocket 实时状态、私人底牌消息、断线自动重连
-- 30 秒默认行动倒计时；超时能过牌则过牌，否则弃牌
-- 牌桌聊天、已完成牌局记录
-- PostgreSQL 持久化账号和已完成牌局
-- 手机及桌面自适应界面
-- Docker Compose、自动 HTTPS 和备份脚本
+- 管理员创建、启用、禁用和重置玩家账号；没有公开注册。
+- 玩家修改昵称和密码，登录按 IP 做单机固定窗口限流。
+- 私人房间、六位邀请码和可选密码；大厅不会公开其他房间的邀请码。
+- 完整现金桌规则：2～9 人、Heads-up、All-in、任意层边池、平分和奇数筹码。
+- 服务端权威状态、版本校验、`actionId` 幂等、行动/超时竞争串行化。
+- 洗牌承诺先持久化和广播，再发底牌；牌局结束公开种子。
+- 活跃房间和未完成牌局写入数据库；重启后恢复原牌堆、底牌、下注与计时器。
+- 参与者可分页查看自己的牌局历史；聊天只实时传输，不落库。
+- Vue 3 响应式界面、URL 刷新恢复、断线遮罩、移动下注快捷操作。
+- Docker Compose + PostgreSQL + Caddy HTTPS，带健康检查、日志轮转和安全响应头。
 
-## 项目结构
+## 结构
 
 ```text
-texas-holdem/
-├── poker-domain/   不依赖框架的牌型、边池和牌桌状态机
-├── poker-server/   Spring Boot REST、WebSocket、安全和数据库
-├── poker-web/      Vue 3 + TypeScript 网页端
-├── deploy/         Caddy 配置
-├── scripts/        本地启动和数据库备份辅助脚本
-└── compose.yml     云服务器部署编排
+poker-domain/   无框架的规则、牌型、底池与可恢复牌桌状态机
+poker-server/   Spring Boot REST/STOMP、安全、持久化与迁移
+poker-web/      Vue 3 + TypeScript 单页前端
+deploy/         Caddy 配置
+scripts/        验证、启动、备份和迁移检查脚本
+docs/           架构、API 与上线手册
 ```
 
-后端采用模块化单体。每张牌桌是一个串行聚合，浏览器只能提交玩家意图，筹码、合法动作、发牌及胜负全部由服务端决定。任何公共消息都不包含其他玩家的底牌；每位玩家通过专属 WebSocket 队列收到自己的视图。
+单服务器最多约 20 人、同时 1～3 桌是当前设计边界。项目刻意不使用 Redis、消息队列、微服务、前端路由库或状态管理库。
 
-## 本地开发
+## 本地运行
 
-需要：JDK 21 或更高版本、Maven 3.9、Node.js 22 或更高版本、pnpm。
-
-启动后端：
+要求：JDK 21+、Maven 3.9+、Node.js 22+、pnpm。
 
 ```powershell
 mvn -pl poker-server -am spring-boot:run
 ```
 
-首次启动会在项目目录的 `data` 中创建 H2 开发数据库。后端地址为 `http://localhost:8080`。
-
-另开一个终端启动前端：
+另开终端：
 
 ```powershell
 cd poker-web
@@ -53,88 +44,32 @@ pnpm install
 pnpm dev
 ```
 
-浏览器打开 `http://localhost:5173`。Vite 会把 API 和 WebSocket 转发到本地后端。
+浏览器访问 `http://localhost:5173`。本地数据在 `data/` 的 H2 文件中；正式环境使用 PostgreSQL。
 
-运行全部测试与构建：
+项目不创建默认账号。首次使用前按[上线手册](docs/上线部署清单与操作手册.md)生成 BCrypt 哈希并手工插入首个管理员。
+
+## 验证
+
+Windows：
 
 ```powershell
-mvn test
-cd poker-web
-pnpm build
+./scripts/verify.ps1
 ```
 
-## 云服务器部署
-
-准备条件：
-
-1. 一台建议至少 2 核、2 GB 内存的 Linux 云服务器。
-2. 已安装 Docker Engine 和 Docker Compose 插件。
-3. 一个已解析到服务器公网 IP 的域名。
-4. 安全组放行 TCP 80、TCP/UDP 443；不要把 PostgreSQL 端口暴露到公网。
-
-部署步骤：
+Linux/macOS：
 
 ```bash
-cp .env.example .env
+sh scripts/verify.sh
 ```
 
-编辑 `.env`，填写域名并换成长随机数据库密码，然后运行：
+脚本依次运行后端测试、前端依赖锁校验、TypeScript 检查和生产构建。安装 Docker 后还可运行：
 
 ```bash
-docker compose up -d --build
-docker compose ps
+sh scripts/verify-postgres.sh
 ```
 
-Caddy 会自动申请并续期 HTTPS 证书。健康检查地址为：
+该脚本会使用临时容器分别验证 PostgreSQL 全新库和 V1 升级库，完成后自动清理。
 
-```text
-https://你的域名/actuator/health
-```
+## 上线
 
-查看日志：
-
-```bash
-docker compose logs -f app web
-```
-
-升级版本：
-
-```bash
-git pull
-docker compose up -d --build
-```
-
-备份数据库：
-
-```bash
-sh scripts/backup-postgres.sh
-```
-
-建议通过服务器的定时任务每天执行一次备份脚本，并把备份文件同步到另一台机器或对象存储。
-
-## 关键规则约定
-
-- 所有筹码均为 `long` 整数，不使用浮点数。
-- 加注参数表示“本轮累计下注到多少”，不是额外增加多少。
-- 不足一个完整最小加注的 All-in 不会重新开放已经行动玩家的加注权。
-- 玩家超时：可以过牌时自动过牌，否则自动弃牌。
-- 平分底池出现余数时，从庄家左侧开始向获胜者依次分配奇数筹码。
-- 玩家只能在两手牌之间入座或离座。
-- 服务端用 `SecureRandom` 生成 256 位种子；发牌前公布 SHA-256 承诺，结束后公开种子供玩家核对。
-
-## 当前边界
-
-- 活跃房间和未完成牌局保存在单个应用实例内；服务器重启后需要重新开房，账号和已完成牌局不会丢失。
-- 第一版面向一台服务器，不支持多实例共同承载同一张桌。
-- 房间大厅目前会显示所有正在运行的房间，但有密码的房间仍需验证密码才能进入。
-- 这是朋友娱乐项目。如果未来加入真钱、可交易筹码或抽水，应在开发前咨询部署地和参与者所在地的专业法律意见。
-
-## 默认配置
-
-- 小盲 / 大盲：10 / 20
-- 初始筹码：2,000
-- 最大人数：9
-- 行动时间：30 秒
-- 密码哈希：BCrypt，强度 12
-- 生产数据库：PostgreSQL 17
-- 生产运行时：Java 25
+完整步骤见[上线部署清单与操作手册](docs/上线部署清单与操作手册.md)。API 契约见 [API.md](docs/API.md)，恢复和并发设计见 [ARCHITECTURE.md](docs/ARCHITECTURE.md)。

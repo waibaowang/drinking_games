@@ -27,15 +27,27 @@ public class UserAccount {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
+    @Column(nullable = false, length = 16)
+    private String role;
+
+    @Column(nullable = false)
+    private boolean enabled;
+
+    @Column(name = "updated_at", nullable = false)
+    private Instant updatedAt;
+
     protected UserAccount() {
     }
 
-    public UserAccount(String username, String passwordHash, String displayName) {
+    public UserAccount(String username, String passwordHash, String displayName, UserRole role) {
         this.id = UUID.randomUUID().toString();
         this.username = username;
         this.passwordHash = passwordHash;
         this.displayName = displayName;
         this.createdAt = Instant.now();
+        this.role = role.name();
+        this.enabled = true;
+        this.updatedAt = this.createdAt;
     }
 
     public String getId() { return id; }
@@ -43,5 +55,27 @@ public class UserAccount {
     public String getPasswordHash() { return passwordHash; }
     public String getDisplayName() { return displayName; }
     public Instant getCreatedAt() { return createdAt; }
-}
+    public UserRole getRole() { return UserRole.valueOf(role); }
+    public boolean isEnabled() { return enabled; }
+    public Instant getUpdatedAt() { return updatedAt; }
 
+    public void updateProfile(String displayName) {
+        this.displayName = displayName;
+        this.updatedAt = Instant.now();
+    }
+
+    public void resetPassword(String passwordHash) {
+        this.passwordHash = passwordHash;
+        this.updatedAt = Instant.now();
+    }
+
+    public void setEnabled(boolean enabled) {
+        this.enabled = enabled;
+        this.updatedAt = Instant.now();
+    }
+
+    public void setRole(UserRole role) {
+        this.role = role.name();
+        this.updatedAt = Instant.now();
+    }
+}

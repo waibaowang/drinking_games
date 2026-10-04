@@ -28,7 +28,7 @@ public class GameWebSocketController {
     @MessageMapping("/rooms/{roomId}/action")
     public void action(@DestinationVariable UUID roomId, @Payload ActionMessage message, Principal principal) {
         if (message.action() == null) throw new IllegalArgumentException("缺少操作类型");
-        games.act(roomId, principal.getName(), message.action(), message.amount(), message.version());
+        games.act(roomId, principal.getName(), message.actionId(), message.action(), message.amount(), message.version());
     }
 
     @MessageMapping("/rooms/{roomId}/chat")

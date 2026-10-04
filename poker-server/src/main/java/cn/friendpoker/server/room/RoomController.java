@@ -34,9 +34,9 @@ public class RoomController {
         this.users = users;
     }
 
-    @GetMapping
-    public List<RoomSummary> list() {
-        return rooms.list();
+    @GetMapping("/mine")
+    public List<RoomSummary> mine(Principal principal) {
+        return rooms.mine(principal.getName());
     }
 
     @PostMapping
@@ -49,13 +49,6 @@ public class RoomController {
     @PostMapping("/join")
     public RoomState joinByCode(@Valid @RequestBody JoinByCodeRequest request, Principal principal) {
         PokerRoom room = rooms.joinByCode(request.code(), principal.getName(), request.password());
-        games.broadcast(room.id());
-        return games.state(room.id(), principal.getName());
-    }
-
-    @PostMapping("/{roomId}/join")
-    public RoomState join(@PathVariable UUID roomId, @RequestBody JoinRequest request, Principal principal) {
-        PokerRoom room = rooms.join(roomId, principal.getName(), request.password());
         games.broadcast(room.id());
         return games.state(room.id(), principal.getName());
     }
@@ -84,9 +77,6 @@ public class RoomController {
         games.start(roomId, principal.getName());
     }
 
-    public record JoinRequest(String password) {
-        public JoinRequest { password = password == null ? "" : password; }
-    }
     public record JoinByCodeRequest(@NotBlank @Size(min = 6, max = 6) String code, String password) {
         public JoinByCodeRequest { password = password == null ? "" : password; }
     }

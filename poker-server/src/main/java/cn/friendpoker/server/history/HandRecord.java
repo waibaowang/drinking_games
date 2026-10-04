@@ -22,15 +22,24 @@ public class HandRecord {
     private String summary;
     @Column(name = "completed_at", nullable = false)
     private Instant completedAt;
+    @Column(name = "room_name", nullable = false, length = 64)
+    private String roomName;
 
     protected HandRecord() {}
 
-    public HandRecord(UUID roomId, long handNumber, String summary) {
+    public HandRecord(UUID roomId, String roomName, long handNumber, String summary) {
         this.id = UUID.randomUUID().toString();
         this.roomId = roomId.toString();
         this.handNumber = handNumber;
         this.summary = summary;
         this.completedAt = Instant.now();
+        this.roomName = roomName;
     }
-}
 
+    public String getId() { return id; }
+    public String getRoomId() { return roomId; }
+    public long getHandNumber() { return handNumber; }
+    public String getSummary() { return summary; }
+    public Instant getCompletedAt() { return completedAt; }
+    public String getRoomName() { return roomName; }
+}

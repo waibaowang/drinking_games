@@ -13,6 +13,7 @@ public record RoomState(
         String hostUsername,
         TableConfig config,
         TableSnapshot table,
-        Instant actionDeadline
+        Instant actionDeadline,
+        RoomStatus status,
+        boolean recovered
 ) {}
-

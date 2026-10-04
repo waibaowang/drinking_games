@@ -13,6 +13,11 @@ services:
       interval: 5s
       timeout: 3s
       retries: 12
+    logging: &default-logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   app:
     build:
@@ -26,6 +31,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 3 bash -c '</dev/tcp/127.0.0.1/8080'"]
+      interval: 10s
+      timeout: 4s
+      retries: 12
+      start_period: 30s
+    logging: *default-logging
 
   web:
     build:
@@ -42,10 +54,11 @@ services:
       - caddy-data:/data
       - caddy-config:/config
     depends_on:
-      - app
+      app:
+        condition: service_healthy
+    logging: *default-logging
 
 volumes:
   postgres-data:
   caddy-data:
   caddy-config:
-
