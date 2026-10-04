@@ -1,0 +1,51 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: poker
+      POSTGRES_USER: poker
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U poker -d poker"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  app:
+    build:
+      context: .
+      dockerfile: poker-server/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
+      ALLOWED_ORIGINS: https://${DOMAIN}
+      COOKIE_SECURE: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: poker-web/Dockerfile
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+
+volumes:
+  postgres-data:
+  caddy-data:
+  caddy-config:
+

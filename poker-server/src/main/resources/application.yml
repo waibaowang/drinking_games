@@ -1,0 +1,39 @@
+spring:
+  application:
+    name: friend-poker
+  datasource:
+    url: jdbc:h2:file:./data/poker;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH
+    username: sa
+    password:
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+  session:
+    timeout: 7d
+
+server:
+  port: 8080
+  forward-headers-strategy: framework
+  servlet:
+    session:
+      cookie:
+        http-only: true
+        same-site: lax
+        secure: ${COOKIE_SECURE:false}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+poker:
+  allowed-origins: ${ALLOWED_ORIGINS:http://localhost:5173,http://localhost:8080}
+

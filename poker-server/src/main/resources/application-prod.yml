@@ -1,0 +1,15 @@
+spring:
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://postgres:5432/poker}
+    username: ${DATABASE_USERNAME:poker}
+    password: ${DATABASE_PASSWORD}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+
+server:
+  servlet:
+    session:
+      cookie:
+        secure: true
+
