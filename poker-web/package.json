@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host :: --strictPort",
+    "test": "node --test test/*.test.mjs",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview"
   },
