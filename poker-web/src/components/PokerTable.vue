@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Client } from '@stomp/stompjs'
 import { api } from '../api'
+import { shouldApplyRoomUpdate } from '../room-updates'
 import type { ActionType, PlayerSnapshot, PokerRoomState, UserView } from '../types'
 import PlayingCard from './PlayingCard.vue'
 
@@ -90,7 +91,8 @@ function setWager(value: number) {
   wager.value = Math.max(Math.min(minimumTarget.value, maximumTarget.value), Math.min(maximumTarget.value, integer))
 }
 function applyIncoming(incoming: PokerRoomState) {
-  if (incoming.status === 'CLOSED' || incoming.table.version >= room.value.table.version) room.value = incoming
+  if (!shouldApplyRoomUpdate(room.value.status, room.value.table.version, incoming.status, incoming.table.version)) return
+  room.value = incoming
   if (incoming.status === 'CLOSED' || (pendingVersion.value !== null && incoming.table.version > pendingVersion.value)) {
     actionPending.value = false
     pendingVersion.value = null

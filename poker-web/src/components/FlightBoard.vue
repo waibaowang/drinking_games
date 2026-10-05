@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId } from 'vue'
 import { Client } from '@stomp/stompjs'
 import { api } from '../api'
+import { shouldApplyRoomUpdate } from '../room-updates'
 import type { FlightPlayerSnapshot, FlightRoomState, UserView } from '../types'
 import FlightPlane from './FlightPlane.vue'
 import FlightDetails from './FlightDetails.vue'
@@ -125,7 +126,8 @@ async function refreshState(settlePending = false) {
   catch (cause) { showError(cause); return false }
 }
 function applyIncoming(incoming: FlightRoomState) {
-  if (incoming.status === 'CLOSED' || incoming.game.version >= room.value.game.version) room.value = incoming
+  if (!shouldApplyRoomUpdate(room.value.status, room.value.game.version, incoming.status, incoming.game.version)) return
+  room.value = incoming
   if (incoming.status === 'CLOSED') closeDrawer()
   if (incoming.status === 'CLOSED' || (pendingVersion.value !== null && incoming.game.version > pendingVersion.value)) {
     clearPending()
