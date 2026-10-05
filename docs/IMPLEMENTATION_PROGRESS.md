@@ -76,3 +76,11 @@ Ponytail 原则的影响：没有引入 Redis、消息队列、微服务、路�
 2. 阅读本节确认最近检查点与已完成验证；若工作区干净，可直接从飞行棋第二轮提交继续下一项需求。
 3. 修改后仍运行 `scripts/verify.ps1` 和 `git diff --check`；迁移变化还需运行 `sh -n scripts/*.sh`，有 Docker 时运行 `sh scripts/verify-postgres.sh`。
 4. 后续道具效果必须保持现有刷新约束：第 1 轮为 0 个，第 2、4、6……轮各尝试刷新 2 个；每个连同生成轮停留 3 轮，同时最多 4 个。
+
+## 2026-10-05 本地访问恢复
+
+- 排查时 8080 和 5173 均无服务监听，已用后台进程重新启动。
+- `scripts/run-local.ps1` 增加启动健康检查、日志输出、`-SkipBuild` 和重复运行复用；前端直接由 Node 启动，固定端口，失败时显示日志。
+- 前端监听 IPv4/IPv6，避免本机 `localhost` 先尝试 IPv6、回退超过检查超时；启动检查使用 `127.0.0.1`。
+- 已验证网页、前端入口脚本、IPv4 和 IPv6 地址均返回 HTTP 200；后端和代理健康状态均为 `UP`，登录 CSRF 接口可用；重复运行启动脚本后两个进程 PID 不变。
+- 网页入口为 `http://localhost:5173`；8080 仅承载后端接口，健康地址为 `http://localhost:8080/actuator/health`。日志保存在 `data/local-logs/`。

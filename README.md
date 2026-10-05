@@ -35,6 +35,16 @@ docs/           架构、API 与上线手册
 
 要求：JDK 21+、Maven 3.9+、Node.js 22+、pnpm。
 
+Windows 可使用后台启动脚本，它会构建后端、检查服务可用性，并把日志保存在 `data/local-logs/`：
+
+```powershell
+./scripts/run-local.ps1
+```
+
+已有最新 JAR 时可加 `-SkipBuild`。重复运行会复用正在运行的服务。网页入口为 `http://localhost:5173`，`8080` 是后端接口端口，可通过 `http://localhost:8080/actuator/health` 检查状态。后台服务退出后，重新运行脚本即可恢复。
+
+也可以分别在终端中启动：
+
 ```powershell
 mvn -pl poker-server -am spring-boot:run
 ```
