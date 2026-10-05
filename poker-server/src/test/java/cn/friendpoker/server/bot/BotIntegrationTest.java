@@ -39,6 +39,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -53,15 +54,19 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
@@ -93,6 +98,7 @@ class BotIntegrationTest {
     @Autowired ObjectMapper json;
     @Autowired MockMvc mvc;
     @MockitoBean BotScheduler scheduler;
+    @MockitoBean SimpMessagingTemplate messaging;
     private String host;
     private String guest;
 
@@ -198,8 +204,7 @@ class BotIntegrationTest {
     @ParameterizedTest
     @EnumSource(GameType.class)
     void pausedOfflineStaleOrRepeatedJobsDoNotAdvanceGames(GameType type) {
-        Fixture fixture = ready(type);
-        activate(fixture);
+        Fixture fixture = chainedBotAction(type);
         String actor = roster(fixture).getFirst().id();
         Object before = gameState(fixture);
         long version = version(fixture);
@@ -229,8 +234,38 @@ class BotIntegrationTest {
         Object accepted = gameState(fixture);
         step(fixture, resumedVersion, actor, "accepted-job");
         assertFrozen(fixture, accepted, resumedVersion + 1);
-        step(fixture, resumedVersion + 1, actor, "accepted-job");
+        String nextActor = currentActor(fixture);
+        assertTrue(roster(fixture).stream().anyMatch(bot -> bot.id().equals(nextActor)));
+        step(fixture, resumedVersion + 1, nextActor, "accepted-job");
         assertFrozen(fixture, accepted, resumedVersion + 1);
+    }
+
+    @ParameterizedTest
+    @EnumSource(GameType.class)
+    void broadcastFailuresDoNotStopCommittedBotActionsFromSchedulingTheirNextMove(GameType type) {
+        Fixture fixture = chainedBotAction(type);
+        String actor = currentActor(fixture);
+        long beforeVersion = version(fixture);
+        clearInvocations(scheduler, messaging);
+        doThrow(new IllegalStateException("simulated broker send failure")).when(messaging)
+                .convertAndSendToUser(eq(host), anyString(), any());
+
+        assertDoesNotThrow(() -> step(fixture, beforeVersion, actor, "broadcast-failure-job"));
+
+        assertEquals(beforeVersion + 1, version(fixture));
+        assertTrue(roster(fixture).stream().anyMatch(bot -> bot.id().equals(currentActor(fixture))));
+        verify(messaging).convertAndSendToUser(eq(host), anyString(), any());
+        doNothing().when(messaging).convertAndSendToUser(eq(host), anyString(), any());
+        verify(scheduler).schedule(eq(fixture.id()), eq(beforeVersion + 1), eq(800L), any(Runnable.class));
+        if (type == GameType.POKER) {
+            PokerRoom saved = restoredPoker(fixture);
+            assertEquals(gameState(fixture), saved.table().exportState());
+            assertTrue(saved.hasActionId("broadcast-failure-job"));
+        } else {
+            FlightRoom saved = restoredFlight(fixture);
+            assertEquals(gameState(fixture), saved.game().exportState());
+            assertTrue(saved.hasActionId("broadcast-failure-job"));
+        }
     }
 
     @ParameterizedTest
@@ -405,6 +440,41 @@ class BotIntegrationTest {
         sitHost(fixture);
         add(fixture, host, 0);
         return fixture;
+    }
+
+    private Fixture chainedBotAction(GameType type) {
+        Fixture fixture = ready(type);
+        if (type == GameType.POKER) add(fixture, host, 2);
+        activate(fixture);
+        if (type == GameType.FLIGHT) {
+            FlightPersistenceState saved = flightRooms.get(fixture.id()).game().exportState();
+            installFlight(fixture, FlightGame.restore(new FlightPersistenceState(saved.players(), FlightPhase.MOVE,
+                    saved.version() + 1, saved.gameNumber(), saved.roundNumber(), 0, 6, Set.of(), saved.boardItems(),
+                    saved.nextItemId(), saved.messages(), null)));
+        } else {
+            PokerRoom room = pokerRooms.get(fixture.id());
+            TablePersistenceState saved = room.table().exportState();
+            List<PlayerPersistenceState> players = saved.players().stream().map(player -> new PlayerPersistenceState(
+                    player.id(), player.name(), player.seat(), 980, 0, 20,
+                    player.id().equals(host) ? PlayerStatus.FOLDED : PlayerStatus.ACTIVE, player.holeCards())).toList();
+            installPoker(fixture, HoldemTable.restore(room.config(), new TablePersistenceState(players,
+                    saved.deck().subList(saved.deckCursor() + 1, saved.deckCursor() + 4), saved.deck(), saved.deckCursor() + 4,
+                    Street.FLOP, saved.version() + 1, saved.handNumber(), 0, room.config().bigBlind(),
+                    saved.buttonSeat(), saved.smallBlindSeat(), saved.bigBlindSeat(), 0, Set.of(0, 2), Set.of(), Map.of(),
+                    saved.messages(), saved.shuffleCommitment(), saved.shuffleSeed())));
+        }
+        return fixture;
+    }
+
+    private String currentActor(Fixture fixture) {
+        if (fixture.type() == GameType.POKER) {
+            var view = pokerRooms.get(fixture.id()).table().snapshotFor("");
+            return view.players().stream().filter(player -> Integer.valueOf(player.seat()).equals(view.actorSeat()))
+                    .findFirst().orElseThrow().id();
+        }
+        var view = flightRooms.get(fixture.id()).game().snapshotFor("");
+        return view.players().stream().filter(player -> Integer.valueOf(player.seat()).equals(view.currentSeat()))
+                .findFirst().orElseThrow().id();
     }
 
     private void sitHost(Fixture fixture) {

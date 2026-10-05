@@ -10,7 +10,7 @@ const emit = defineEmits<{ pending: [value: boolean]; updated: [room: RoomState]
 const pending = ref(false)
 const selectedSeat = ref<number | null>(null)
 const controls = computed(() => botControlState(props.room, props.username, props.connected, props.busy || pending.value))
-const canAdd = computed(() => controls.value.canEdit && controls.value.hasHuman && controls.value.emptySeats.length > 0)
+const canAdd = computed(() => controls.value.canAdd)
 watch(() => controls.value.emptySeats, seats => {
   if (selectedSeat.value === null || !seats.includes(selectedSeat.value)) selectedSeat.value = seats[0] ?? null
 }, { immediate: true })
@@ -62,6 +62,7 @@ function speed(event: Event) {
     </template>
     <ul v-if="controls.bots.length" class="bot-list"><li v-for="bot in controls.bots" :key="bot.id"><span class="bot-player-name"><b class="bot-tag">BOT</b><strong>{{ bot.name }}</strong><small>{{ seatLabel(bot.seat) }}</small></span><button v-if="controls.host" type="button" :disabled="!controls.canEdit" :aria-label="`移除 ${bot.name}`" @click="remove(bot.id)">移除</button></li></ul>
     <p v-if="controls.depletedBotIds.length" class="bot-hint">有机器人筹码用完，不会自动补充。请在两手之间移除，再重新添加。</p>
+    <p v-if="room.gameType === 'POKER' && controls.betweenGames && controls.bots.length && controls.hasHuman && !controls.hasFundedHuman" class="bot-hint">开局需要至少一名有筹码的真人，请先离座，再重新入座继续。</p>
     <p v-if="controls.bots.length && !controls.settings.enabled" class="bot-hint">仅暂停机器人，真人仍可操作；轮到机器人时等待继续。</p>
   </section>
 </template>

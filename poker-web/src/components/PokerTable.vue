@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Client } from '@stomp/stompjs'
 import { api } from '../api'
 import { shouldApplyRoomUpdate } from '../room-updates'
+import { botControlState } from '../bot-controls'
 import type { ActionType, PlayerSnapshot, PokerRoomState, RoomState, UserView } from '../types'
 import PlayingCard from './PlayingCard.vue'
 import BotControls from './BotControls.vue'
@@ -40,8 +41,8 @@ const secondsLeft = computed(() => room.value.actionDeadline ? Math.max(0, Math.
 const callAmount = computed(() => Math.max(0, room.value.table.currentBet - (me.value?.committedStreet ?? 0)))
 const minimumTarget = computed(() => room.value.table.currentBet === 0 ? room.value.table.minimumRaise : room.value.table.currentBet + room.value.table.minimumRaise)
 const maximumTarget = computed(() => (me.value?.committedStreet ?? 0) + (me.value?.stack ?? 0))
-const canStart = computed(() => props.user.username === room.value.hostUsername && betweenHands.value
-  && room.value.table.players.filter(player => player.stack > 0).length >= 2)
+const roomControls = computed(() => botControlState(room.value, props.user.username, connected.value, busy.value))
+const canStart = computed(() => roomControls.value.canStart)
 const stageName: Record<string, string> = { WAITING: '等待开局', SHUFFLE_PENDING: '洗牌承诺', PREFLOP: '翻牌前', FLOP: '翻牌圈', TURN: '转牌圈', RIVER: '河牌圈', COMPLETE: '本手结束' }
 
 function seatStyle(seat: number) {
@@ -239,7 +240,8 @@ onBeforeUnmount(() => {
           </template>
           <template v-else>
             <div class="action-hint">
-              <span v-if="room.table.street === 'WAITING'">等待房主开始第一手牌</span>
+              <span v-if="roomControls.selfOutOfChips">你的筹码已用完，请先离座，再重新入座继续。</span>
+              <span v-else-if="room.table.street === 'WAITING'">等待房主开始第一手牌</span>
               <span v-else-if="room.table.street === 'SHUFFLE_PENDING'">承诺已保存，正在发牌…</span>
               <span v-else-if="room.table.street === 'COMPLETE'">本手结束，准备下一手</span>
               <span v-else>等待其他玩家行动 <b v-if="secondsLeft !== null">· {{ secondsLeft }}s</b></span>

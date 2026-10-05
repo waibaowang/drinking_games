@@ -285,9 +285,14 @@ public class GameCoordinator {
     }
 
     private void broadcast(PokerRoom room) {
-        activeMembers(room).forEach(member -> messaging.convertAndSendToUser(member,
-                "/queue/rooms/" + room.id(), toState(room, member)));
-        scheduleBot(room);
+        try {
+            activeMembers(room).forEach(member -> messaging.convertAndSendToUser(member,
+                    "/queue/rooms/" + room.id(), toState(room, member)));
+        } catch (RuntimeException exception) {
+            log.warn("room={} operation=BROADCAST failed; committed state remains available", room.id(), exception);
+        } finally {
+            scheduleBot(room);
+        }
     }
 
     private void announceCommitment(PokerRoom room) {

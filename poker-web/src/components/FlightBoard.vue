@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId } from 'vue'
 import { Client } from '@stomp/stompjs'
 import { api } from '../api'
 import { shouldApplyRoomUpdate } from '../room-updates'
+import { botControlState, flightBotTurnMessage } from '../bot-controls'
 import type { FlightPlayerSnapshot, FlightRoomState, RoomState, UserView } from '../types'
 import FlightPlane from './FlightPlane.vue'
 import FlightDetails from './FlightDetails.vue'
@@ -39,11 +40,13 @@ const myTurn = computed(() => me.value?.seat === room.value.game.currentSeat)
 const busy = computed(() => actionPending.value || requestPending.value || botPending.value)
 const canOperate = computed(() => connected.value && room.value.status === 'ACTIVE' && !busy.value)
 const betweenGames = computed(() => ['WAITING', 'COMPLETE'].includes(room.value.game.phase))
-const canStart = computed(() => props.user.username === room.value.hostUsername
-  && betweenGames.value && room.value.game.players.length >= 2)
+const canStart = computed(() => botControlState(room.value, props.user.username, connected.value, busy.value).canStart)
+const botTurnMessage = computed(() => flightBotTurnMessage(room.value))
+const botPaused = computed(() => !!botTurnMessage.value && room.value.botSettings?.enabled === false)
 const turnTitle = computed(() => {
   if (room.value.game.phase === 'WAITING') return seated.value ? '等待房主开始游戏' : '选择颜色，一起起飞'
   if (room.value.game.phase === 'COMPLETE') return room.value.game.winnerId === props.user.username ? '你赢得了这一局！' : `${room.value.game.players.find(p => p.id === room.value.game.winnerId)?.name || '玩家'} 获得胜利`
+  if (botTurnMessage.value) return botTurnMessage.value
   if (myTurn.value) return room.value.game.phase === 'MOVE' ? `掷出了 ${room.value.game.lastRoll}，选择飞机` : '轮到你掷骰子'
   return `等待 ${playerAt(room.value.game.currentSeat ?? -1)?.name || '玩家'} 操作`
 })
@@ -270,11 +273,12 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="flight-action-panel" aria-live="polite">
-            <div class="flight-turn-status"><strong>{{ turnTitle }}</strong><small>{{ betweenGames ? '2～4 人 · 5 或 6 起飞' : '不限时' }}</small></div>
-            <template v-if="myTurn && !betweenGames">
-              <div class="flight-die" :class="{ rolling: actionPending }" role="img" :aria-label="room.game.lastRoll ? `骰子 ${room.game.lastRoll} 点` : '等待掷骰'">
+            <div class="flight-turn-status"><strong>{{ turnTitle }}</strong><small>{{ botPaused ? '等待继续机器人' : betweenGames ? '2～4 人 · 5 或 6 起飞' : '不限时' }}</small></div>
+              <div v-if="!betweenGames" class="flight-die" :class="{ rolling: actionPending }" role="img" :aria-label="room.game.lastRoll ? `${room.game.phase === 'MOVE' ? '本次' : '上次'}骰子 ${room.game.lastRoll} 点` : '等待掷骰'">
                 <span v-for="pip in dicePips[room.game.lastRoll ?? 0] || []" :key="pip" class="pip" :class="`pip-${pip + 1}`"></span><span v-if="!room.game.lastRoll" class="flight-die-ready" aria-hidden="true">✦</span>
+                <small v-if="room.game.lastRoll" class="flight-die-caption" aria-hidden="true">{{ room.game.phase === 'MOVE' ? '本次' : '上次' }}</small>
               </div>
+            <template v-if="myTurn && !betweenGames">
               <button v-if="room.game.phase === 'ROLL'" class="flight-primary flight-roll" :disabled="!canOperate" @click="act('ROLL')">{{ actionPending ? '掷骰中…' : '掷骰子' }}</button>
               <div v-else class="flight-move-options"><button v-for="index in room.game.legalPieceIndexes" :key="index" class="flight-piece-choice" :style="{ '--seat-color': colors[me?.seat ?? 0] }" :disabled="!canOperate" @click="act('MOVE', index)">{{ index + 1 }} 号飞机</button><small>{{ actionPending ? '移动中…' : '也可点击发光的飞机' }}</small></div>
             </template>
@@ -304,4 +308,6 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .flight-bot-mark { display: inline-block; margin-right: 3px; padding: 0 2px; border: 1px solid #ffffffaa; border-radius: 3px; font-size: 8px; vertical-align: 1px; }
+.flight-die-ready { grid-area: 1 / 1 / 4 / 4; align-self: center; }
+.flight-die-caption { position: absolute; right: 0; bottom: -16px; left: 0; color: #38608c; font-size: 10px; line-height: 12px; font-weight: 600; }
 </style>

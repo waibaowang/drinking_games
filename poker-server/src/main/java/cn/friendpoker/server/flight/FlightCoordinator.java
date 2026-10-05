@@ -135,9 +135,14 @@ public class FlightCoordinator {
     }
 
     private void broadcast(FlightRoom room) {
-        activeMembers(room).forEach(member -> messaging.convertAndSendToUser(member,
-                "/queue/flight-rooms/" + room.id(), toState(room, member)));
-        scheduleBot(room);
+        try {
+            activeMembers(room).forEach(member -> messaging.convertAndSendToUser(member,
+                    "/queue/flight-rooms/" + room.id(), toState(room, member)));
+        } catch (RuntimeException exception) {
+            log.warn("room={} operation=BROADCAST failed; committed state remains available", room.id(), exception);
+        } finally {
+            scheduleBot(room);
+        }
     }
 
     private List<String> activeMembers(FlightRoom room) {

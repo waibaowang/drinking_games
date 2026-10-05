@@ -76,7 +76,11 @@ Linux/macOS：
 sh scripts/verify.sh
 ```
 
-脚本依次运行后端测试、前端依赖锁校验、前端原生测试、TypeScript 检查和生产构建。安装 Docker 后还可运行：
+脚本依次运行后端测试、前端依赖锁校验、前端原生测试、TypeScript 检查和生产构建。
+
+Windows 下若用 JAR 启动了后端，验证前需停止该后端进程，避免构建时 JAR 被占用；验证后用 `scripts/run-local.ps1 -SkipBuild` 重新启动。H2 数据不会因此清除，已有房间在重新登录后恢复。
+
+安装 Docker 后还可运行：
 
 ```bash
 sh scripts/verify-postgres.sh
