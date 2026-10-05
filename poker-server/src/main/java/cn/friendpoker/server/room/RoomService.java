@@ -112,7 +112,7 @@ public class RoomService {
 
     private RoomSummary summary(PokerRoom room) {
         return new RoomSummary(room.id(), GameType.POKER, room.code(), room.name(), room.passwordHash() != null,
-                room.members().size(), room.config().maxPlayers(), room.config().smallBlind(),
+                room.members().size() + room.bots().size(), room.config().maxPlayers(), room.config().smallBlind(),
                 room.config().bigBlind(), room.status(), room.recovered());
     }
 

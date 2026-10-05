@@ -3,8 +3,9 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Client } from '@stomp/stompjs'
 import { api } from '../api'
 import { shouldApplyRoomUpdate } from '../room-updates'
-import type { ActionType, PlayerSnapshot, PokerRoomState, UserView } from '../types'
+import type { ActionType, PlayerSnapshot, PokerRoomState, RoomState, UserView } from '../types'
 import PlayingCard from './PlayingCard.vue'
+import BotControls from './BotControls.vue'
 
 const props = defineProps<{ initialRoom: PokerRoomState; user: UserView }>()
 const emit = defineEmits<{ leave: [] }>()
@@ -12,6 +13,8 @@ const room = ref(props.initialRoom)
 const error = ref('')
 const connected = ref(false)
 const actionPending = ref(false)
+const requestPending = ref(false)
+const botPending = ref(false)
 const pendingVersion = ref<number | null>(null)
 const recoveryDismissed = ref(false)
 const commitmentNotice = ref('')
@@ -23,15 +26,22 @@ let ticker = 0
 let pendingTimer = 0
 let client: Client | null = null
 let checkingSession = false
+let disposed = false
+let sessionTimer = 0
+let errorTimer = 0
 
 const me = computed(() => room.value.table.players.find(player => player.id === props.user.username))
 const seated = computed(() => !!me.value)
 const myTurn = computed(() => me.value?.seat === room.value.table.actorSeat)
+const busy = computed(() => actionPending.value || requestPending.value || botPending.value)
+const canOperate = computed(() => connected.value && room.value.status === 'ACTIVE' && !busy.value)
+const betweenHands = computed(() => ['WAITING', 'COMPLETE'].includes(room.value.table.street))
 const secondsLeft = computed(() => room.value.actionDeadline ? Math.max(0, Math.ceil((new Date(room.value.actionDeadline).getTime() - now.value) / 1000)) : null)
 const callAmount = computed(() => Math.max(0, room.value.table.currentBet - (me.value?.committedStreet ?? 0)))
 const minimumTarget = computed(() => room.value.table.currentBet === 0 ? room.value.table.minimumRaise : room.value.table.currentBet + room.value.table.minimumRaise)
 const maximumTarget = computed(() => (me.value?.committedStreet ?? 0) + (me.value?.stack ?? 0))
-const canStart = computed(() => room.value.status === 'ACTIVE' && props.user.username === room.value.hostUsername && ['WAITING', 'COMPLETE'].includes(room.value.table.street))
+const canStart = computed(() => props.user.username === room.value.hostUsername && betweenHands.value
+  && room.value.table.players.filter(player => player.stack > 0).length >= 2)
 const stageName: Record<string, string> = { WAITING: '等待开局', SHUFFLE_PENDING: '洗牌承诺', PREFLOP: '翻牌前', FLOP: '翻牌圈', TURN: '转牌圈', RIVER: '河牌圈', COMPLETE: '本手结束' }
 
 function seatStyle(seat: number) {
@@ -39,23 +49,31 @@ function seatStyle(seat: number) {
   return { left: `${50 + 43 * Math.cos(angle)}%`, top: `${50 + 40 * Math.sin(angle)}%` }
 }
 function playerAt(seat: number) { return room.value.table.players.find(player => player.seat === seat) }
+function isBot(id?: string) { return !!id && (room.value.bots ?? []).some(bot => bot.id === id) }
+function canSit(seat: number) { return canOperate.value && !seated.value && betweenHands.value && !playerAt(seat) }
+function applyBotUpdate(incoming: RoomState) {
+  if (incoming.gameType === 'POKER' && incoming.id === room.value.id) applyIncoming(incoming)
+}
 function cardsFor(player?: PlayerSnapshot) { return player?.cards ?? [] }
 
-async function sit(seat: number) {
-  try { await api<void>(`/api/rooms/${room.value.id}/seats/${seat}`, { method: 'POST' }) }
+async function request(path: string, method: 'POST' | 'DELETE') {
+  if (!canOperate.value) return
+  requestPending.value = true
+  try { await api<void>(path, { method }); await refreshState() }
   catch (cause) { showError(cause) }
+  finally { requestPending.value = false }
+}
+async function sit(seat: number) {
+  if (canSit(seat)) await request(`/api/rooms/${room.value.id}/seats/${seat}`, 'POST')
 }
 async function stand() {
-  try { await api<void>(`/api/rooms/${room.value.id}/seat`, { method: 'DELETE' }) }
-  catch (cause) { showError(cause) }
+  if (betweenHands.value && seated.value) await request(`/api/rooms/${room.value.id}/seat`, 'DELETE')
 }
 async function start() {
-  try { await api<void>(`/api/rooms/${room.value.id}/start`, { method: 'POST' }) }
-  catch (cause) { showError(cause) }
+  if (canStart.value) await request(`/api/rooms/${room.value.id}/start`, 'POST')
 }
 function act(action: ActionType) {
-  if (actionPending.value || room.value.status === 'CLOSED') return
-  if (!client?.connected) { error.value = '实时连接尚未恢复'; return }
+  if (!canOperate.value || !client?.connected || !myTurn.value || !room.value.table.legalActions.includes(action)) return
   const amount = action === 'BET' || action === 'RAISE' ? wager.value : 0
   actionPending.value = true
   pendingVersion.value = room.value.table.version
@@ -65,7 +83,7 @@ function act(action: ActionType) {
 }
 function sendChat() {
   const text = chatText.value.trim()
-  if (!text || !client?.connected) return
+  if (!text || !connected.value || !client?.connected || room.value.status !== 'ACTIVE') return
   client.publish({ destination: `/app/rooms/${room.value.id}/chat`, body: JSON.stringify({ text }) })
   chatText.value = ''
 }
@@ -75,11 +93,18 @@ function showError(cause: unknown) {
   pendingVersion.value = null
   window.clearTimeout(pendingTimer)
   if (error.value.includes('状态已变化')) refreshState()
-  window.setTimeout(() => error.value = '', 4000)
+  window.clearTimeout(errorTimer)
+  errorTimer = window.setTimeout(() => error.value = '', 4000)
 }
 async function refreshState() {
-  try { applyIncoming(await api<PokerRoomState>(`/api/rooms/${room.value.id}`)); actionPending.value = false; pendingVersion.value = null }
-  catch (cause) { showError(cause) }
+  try {
+    applyIncoming(await api<PokerRoomState>(`/api/rooms/${room.value.id}`))
+    actionPending.value = false
+    pendingVersion.value = null
+    window.clearTimeout(pendingTimer)
+    return true
+  }
+  catch (cause) { showError(cause); return false }
 }
 async function copyCode() {
   try { await navigator.clipboard.writeText(room.value.code); commitmentNotice.value = '邀请码已复制' }
@@ -91,19 +116,20 @@ function setWager(value: number) {
   wager.value = Math.max(Math.min(minimumTarget.value, maximumTarget.value), Math.min(maximumTarget.value, integer))
 }
 function applyIncoming(incoming: PokerRoomState) {
-  if (!shouldApplyRoomUpdate(room.value.status, room.value.table.version, incoming.status, incoming.table.version)) return
+  if (!shouldApplyRoomUpdate(room.value.status, room.value.stateVersion ?? room.value.table.version, incoming.status, incoming.stateVersion ?? incoming.table.version)) return
+  const tableChanged = incoming.table.version > room.value.table.version
   room.value = incoming
   if (incoming.status === 'CLOSED' || (pendingVersion.value !== null && incoming.table.version > pendingVersion.value)) {
     actionPending.value = false
     pendingVersion.value = null
     window.clearTimeout(pendingTimer)
   }
-  wager.value = Math.min(maximumTarget.value, Math.max(minimumTarget.value, room.value.config.bigBlind))
+  wager.value = Math.max(Math.min(minimumTarget.value, maximumTarget.value), Math.min(maximumTarget.value, tableChanged ? room.value.config.bigBlind : wager.value))
 }
 async function checkSession() {
   if (checkingSession) return
   checkingSession = true
-  window.setTimeout(async () => {
+  sessionTimer = window.setTimeout(async () => {
     try { await api<UserView>('/api/auth/me') } catch { /* api emits session-expired for 401 */ }
     finally { checkingSession = false }
   }, 700)
@@ -116,7 +142,6 @@ function connect() {
     heartbeatIncoming: 10000,
     heartbeatOutgoing: 10000,
     onConnect: async () => {
-      connected.value = true
       client?.subscribe(`/user/queue/rooms/${room.value.id}`, message => {
         applyIncoming(JSON.parse(message.body))
       })
@@ -130,15 +155,24 @@ function connect() {
         chats.value.push(JSON.parse(message.body))
         if (chats.value.length > 50) chats.value.shift()
       })
-      await refreshState()
+      const refreshed = await refreshState()
+      if (!disposed && client?.connected) connected.value = refreshed
+      if (!refreshed && !disposed) client?.forceDisconnect()
     },
-    onStompError: () => checkSession(),
+    onStompError: () => { connected.value = false; checkSession() },
     onWebSocketClose: () => { connected.value = false; actionPending.value = false; checkSession() },
   })
   client.activate()
 }
 onMounted(() => { connect(); ticker = window.setInterval(() => now.value = Date.now(), 500) })
-onBeforeUnmount(() => { window.clearInterval(ticker); window.clearTimeout(pendingTimer); client?.deactivate() })
+onBeforeUnmount(() => {
+  disposed = true
+  window.clearInterval(ticker)
+  window.clearTimeout(pendingTimer)
+  window.clearTimeout(sessionTimer)
+  window.clearTimeout(errorTimer)
+  client?.deactivate()
+})
 </script>
 
 <template>
@@ -167,7 +201,7 @@ onBeforeUnmount(() => { window.clearInterval(ticker); window.clearTimeout(pendin
           <div v-for="seat in room.config.maxPlayers" :key="seat - 1" class="seat-position" :style="seatStyle(seat - 1)">
             <template v-if="playerAt(seat - 1)">
               <div class="player-seat" :class="{ active: room.table.actorSeat === seat - 1, folded: playerAt(seat - 1)?.status === 'FOLDED', self: playerAt(seat - 1)?.id === user.username }">
-                <div class="seat-badges"><span v-if="playerAt(seat - 1)?.dealer">D</span><span v-if="playerAt(seat - 1)?.smallBlind">SB</span><span v-if="playerAt(seat - 1)?.bigBlind">BB</span></div>
+                <div class="seat-badges"><span v-if="isBot(playerAt(seat - 1)?.id)" class="poker-bot-mark" aria-label="机器人">BOT</span><span v-if="playerAt(seat - 1)?.dealer">D</span><span v-if="playerAt(seat - 1)?.smallBlind">SB</span><span v-if="playerAt(seat - 1)?.bigBlind">BB</span></div>
                 <div class="hole-cards">
                   <template v-if="cardsFor(playerAt(seat - 1)).length">
                     <PlayingCard v-for="(card, cardIndex) in cardsFor(playerAt(seat - 1))" :key="cardIndex" :card="card" compact />
@@ -182,7 +216,7 @@ onBeforeUnmount(() => { window.clearInterval(ticker); window.clearTimeout(pendin
                 <span v-if="playerAt(seat - 1)?.status === 'ALL_IN'" class="all-in">ALL IN</span>
               </div>
             </template>
-            <button v-else class="empty-seat" :disabled="seated || !['WAITING', 'COMPLETE'].includes(room.table.street)" @click="sit(seat - 1)">＋<small>入座</small></button>
+            <button v-else class="empty-seat" :disabled="!canSit(seat - 1)" @click="sit(seat - 1)">＋<small>入座</small></button>
           </div>
         </div>
 
@@ -191,16 +225,16 @@ onBeforeUnmount(() => { window.clearInterval(ticker); window.clearTimeout(pendin
           <template v-else-if="myTurn">
             <div class="turn-status"><span>轮到你了</span><strong v-if="secondsLeft !== null">{{ secondsLeft }}s</strong></div>
             <div class="action-buttons">
-            <button v-if="room.table.legalActions.includes('FOLD')" class="danger" :disabled="actionPending" @click="act('FOLD')">弃牌</button>
-              <button v-if="room.table.legalActions.includes('CHECK')" class="secondary" :disabled="actionPending" @click="act('CHECK')">过牌</button>
-              <button v-if="room.table.legalActions.includes('CALL')" class="secondary" :disabled="actionPending" @click="act('CALL')">跟注 {{ Math.min(callAmount, me?.stack ?? 0) }}</button>
+            <button v-if="room.table.legalActions.includes('FOLD')" class="danger" :disabled="!canOperate" @click="act('FOLD')">弃牌</button>
+              <button v-if="room.table.legalActions.includes('CHECK')" class="secondary" :disabled="!canOperate" @click="act('CHECK')">过牌</button>
+              <button v-if="room.table.legalActions.includes('CALL')" class="secondary" :disabled="!canOperate" @click="act('CALL')">跟注 {{ Math.min(callAmount, me?.stack ?? 0) }}</button>
               <div v-if="room.table.legalActions.includes('BET') || room.table.legalActions.includes('RAISE')" class="wager-control">
                 <div class="wager-presets"><button type="button" @click="setWager(minimumTarget)">最小</button><button type="button" @click="setWager(Math.floor(room.table.pot / 2))">半池</button><button type="button" @click="setWager(room.table.pot)">一池</button></div>
                 <input v-model.number="wager" type="range" :min="Math.min(minimumTarget, maximumTarget)" :max="maximumTarget" :step="room.config.smallBlind" />
                 <input v-model.number="wager" type="number" :min="Math.min(minimumTarget, maximumTarget)" :max="maximumTarget" />
-                <button class="primary" :disabled="actionPending" @click="act(room.table.legalActions.includes('BET') ? 'BET' : 'RAISE')">{{ actionPending ? '提交中…' : room.table.legalActions.includes('BET') ? '下注' : '加注' }}</button>
+                <button class="primary" :disabled="!canOperate" @click="act(room.table.legalActions.includes('BET') ? 'BET' : 'RAISE')">{{ actionPending ? '提交中…' : room.table.legalActions.includes('BET') ? '下注' : '加注' }}</button>
               </div>
-              <button v-if="room.table.legalActions.includes('ALL_IN')" class="allin-button" :disabled="actionPending" @click="act('ALL_IN')">All-in</button>
+              <button v-if="room.table.legalActions.includes('ALL_IN')" class="allin-button" :disabled="!canOperate" @click="act('ALL_IN')">All-in</button>
             </div>
           </template>
           <template v-else>
@@ -210,10 +244,11 @@ onBeforeUnmount(() => { window.clearInterval(ticker); window.clearTimeout(pendin
               <span v-else-if="room.table.street === 'COMPLETE'">本手结束，准备下一手</span>
               <span v-else>等待其他玩家行动 <b v-if="secondsLeft !== null">· {{ secondsLeft }}s</b></span>
             </div>
-            <button v-if="canStart" class="primary" @click="start">{{ room.table.handNumber ? '开始下一手' : '开始第一手' }}</button>
-            <button v-if="room.table.street === 'WAITING' || room.table.street === 'COMPLETE'" class="ghost" @click="stand">离座</button>
+            <button v-if="canStart" class="primary" :disabled="!canOperate" @click="start">{{ requestPending ? '正在开始…' : room.table.handNumber ? '开始下一手' : '开始第一手' }}</button>
+            <button v-if="betweenHands && seated" class="ghost" :disabled="!canOperate" @click="stand">离座</button>
           </template>
         </div>
+        <BotControls :room="room" :username="user.username" :connected="connected" :busy="busy" @pending="botPending = $event" @updated="applyBotUpdate" @error="showError" />
       </section>
 
       <aside class="hand-log panel">
@@ -225,7 +260,7 @@ onBeforeUnmount(() => { window.clearInterval(ticker); window.clearTimeout(pendin
         <div v-if="chats.length" class="chat-list">
           <p v-for="chat in chats.slice(-5)" :key="chat.sentAt"><strong>{{ chat.displayName }}</strong>{{ chat.text }}</p>
         </div>
-        <form class="chat-box" @submit.prevent="sendChat"><input v-model="chatText" maxlength="200" :disabled="room.status === 'CLOSED'" placeholder="和桌上的朋友说句话…" /><button class="secondary" :disabled="room.status === 'CLOSED'" aria-label="发送">↑</button></form>
+        <form class="chat-box" @submit.prevent="sendChat"><input v-model="chatText" maxlength="200" :disabled="!connected || room.status === 'CLOSED'" placeholder="和桌上的朋友说句话…" /><button class="secondary" :disabled="!connected || room.status === 'CLOSED' || !chatText.trim()" aria-label="发送">↑</button></form>
         <div class="table-rules"><span>初始筹码 {{ room.config.initialStack }}</span><span>{{ room.config.maxPlayers }} 人桌</span><span>{{ room.config.actionSeconds }} 秒行动</span></div>
         <details v-if="room.table.shuffleCommitment" class="fairness-proof">
           <summary>本手洗牌校验</summary>
@@ -239,3 +274,7 @@ onBeforeUnmount(() => { window.clearInterval(ticker); window.clearTimeout(pendin
     <div v-if="error" class="toast">{{ error }}</div>
   </main>
 </template>
+
+<style scoped>
+.seat-badges .poker-bot-mark { width: auto; min-width: 29px; border-radius: 6px; color: #dcebe2; background: #34644e; }
+</style>

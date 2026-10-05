@@ -3,6 +3,8 @@ package cn.friendpoker.server.flight;
 import cn.friendpoker.domain.flight.FlightGame;
 import cn.friendpoker.domain.flight.FlightPersistenceState;
 import cn.friendpoker.domain.flight.FlightPhase;
+import cn.friendpoker.server.bot.BotSeat;
+import cn.friendpoker.server.bot.BotSettings;
 import cn.friendpoker.server.room.RoomStatus;
 import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -40,7 +42,7 @@ public class FlightRoomStore {
                     values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, room.id().toString(), room.code(), room.name(), room.passwordHash(), room.hostUsername(),
                     room.status().name(), serialize(new PersistedFlightRoomState(room.game().exportState(),
-                            room.recentActionIds())), room.stateVersion(), Timestamp.from(room.createdAt()),
+                            room.recentActionIds(), room.bots(), room.botSettings())), room.stateVersion(), Timestamp.from(room.createdAt()),
                     Timestamp.from(room.createdAt()));
             jdbc.update("insert into flight_room_members (room_id, username, joined_at) values (?, ?, ?)",
                     room.id().toString(), room.hostUsername(), Timestamp.from(room.createdAt()));
@@ -58,13 +60,18 @@ public class FlightRoomStore {
     }
 
     public long saveState(FlightRoom room, FlightGame candidate, List<String> actionIds, RoomStatus status) {
+        return saveState(room, candidate, actionIds, status, room.bots(), room.botSettings());
+    }
+
+    public long saveState(FlightRoom room, FlightGame candidate, List<String> actionIds, RoomStatus status,
+                          List<BotSeat> bots, BotSettings settings) {
         Long next = transactions.execute(transaction -> {
             FlightPersistenceState gameState = candidate.exportState();
             long nextVersion = room.stateVersion() + 1;
             int updated = jdbc.update("""
                     update flight_rooms set state_json = ?, state_version = ?, status = ?, updated_at = ?
                     where id = ? and state_version = ?
-                    """, serialize(new PersistedFlightRoomState(gameState, actionIds)), nextVersion, status.name(),
+                    """, serialize(new PersistedFlightRoomState(gameState, actionIds, bots, settings)), nextVersion, status.name(),
                     Timestamp.from(Instant.now()), room.id().toString(), room.stateVersion());
             if (updated != 1) throw new ConcurrencyFailureException("房间状态已被其他操作更新");
             if (becameComplete(room.game().exportState(), gameState)) insertHistory(room, gameState);
@@ -88,10 +95,12 @@ public class FlightRoomStore {
         List<String> members = jdbc.queryForList(
                 "select username from flight_room_members where room_id = ? order by joined_at",
                 String.class, id.toString());
-        return new FlightRoom(id, rs.getString("code"), rs.getString("name"), rs.getString("password_hash"),
+        FlightRoom room = new FlightRoom(id, rs.getString("code"), rs.getString("name"), rs.getString("password_hash"),
                 rs.getString("host_username"), FlightGame.restore(saved.game()), new LinkedHashSet<>(members),
                 saved.recentActionIds(), rs.getTimestamp("created_at").toInstant(),
                 RoomStatus.valueOf(rs.getString("status")), rs.getLong("state_version"), true);
+        room.installBots(saved.bots(), saved.botSettings());
+        return room;
     }
 
     private void insertHistory(FlightRoom room, FlightPersistenceState state) {
@@ -102,7 +111,7 @@ public class FlightRoomStore {
                 values (?, ?, ?, ?, ?, ?, 'FLIGHT')
                 """, recordId, room.id().toString(), state.gameNumber(), String.join("\n", state.messages()),
                 Timestamp.from(Instant.now()), room.name());
-        state.players().stream().map(player -> player.id()).distinct().forEach(username -> jdbc.update(
+        state.players().stream().map(player -> player.id()).distinct().filter(username -> !room.isBot(username)).forEach(username -> jdbc.update(
                 "insert into hand_record_players (hand_id, username) values (?, ?)", recordId, username));
     }
 

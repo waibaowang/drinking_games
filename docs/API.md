@@ -20,6 +20,10 @@
 | POST | `/api/rooms/{id}/seats/{seat}` | 成员 | 入座；德州座位为 0～8，飞行棋颜色座位为 0～3 |
 | DELETE | `/api/rooms/{id}/seat` | 成员 | 离座 |
 | POST | `/api/rooms/{id}/start` | 房主 | 开始下一手德州或下一局飞行棋 |
+| POST | `/api/rooms/{id}/bots` | 房主 | 添加指定空位机器人，body `{ "seat": 1 }` |
+| POST | `/api/rooms/{id}/bots/fill` | 房主 | 原子补齐空位 |
+| DELETE | `/api/rooms/{id}/bots/{botId}` | 房主 | 两局/手之间移除机器人 |
+| PATCH | `/api/rooms/{id}/bots/settings` | 房主 | 设置 `{ "enabled": true, "speed": "NORMAL" }`，字段可省略 |
 | GET | `/api/history?page=0&size=20` | 登录 | 自己参与的历史分页 |
 | GET | `/api/history/{handId}` | 参与者 | 历史详情 |
 | GET/POST | `/api/admin/users` | 管理员 | 列出/创建玩家账号 |
@@ -72,3 +76,9 @@
 
 飞行棋没有行动截止时间。`version` 和 `actionId` 的并发、过期和重复消息语义与德州一致。
 道具状态随房间视图返回：第 1 轮不刷新，第 2、4、6……轮各刷新 2 个，每个连同生成轮停留 3 轮，同时最多 4 个。当前拾取只移除道具并记录提示，没有额外效果。
+
+## 机器人
+
+两种房间视图增加 `bots: [{ id, name, seat }]`、`botSettings: { enabled, speed }` 和 `stateVersion`。`speed` 仅为 `NORMAL`（约 800ms）或 `FAST`（约 200ms）。机器人配置变更只增加房间 `stateVersion`，动作请求中的 `version` 仍使用 `table.version` / `game.version`。
+
+机器人修改接口成功返回 204。必须先至少一名真人入座，增删/补齐仅允许等待或结算阶段，不能覆盖真人。设置只控制机器人，不改变真人的行动时限。内部机器人 ID 不能注册或用于登录，客户端不能指定机器人身份发送动作。机器人自动任务使用服务端 UUID、房间版本和行动者校验，沿用数据库先提交再广播的顺序。

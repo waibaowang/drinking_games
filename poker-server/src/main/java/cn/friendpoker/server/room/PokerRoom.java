@@ -2,6 +2,8 @@ package cn.friendpoker.server.room;
 
 import cn.friendpoker.domain.game.HoldemTable;
 import cn.friendpoker.domain.game.TableConfig;
+import cn.friendpoker.server.bot.BotSeat;
+import cn.friendpoker.server.bot.BotSettings;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -27,6 +29,8 @@ public final class PokerRoom {
     private Instant actionDeadline;
     private long stateVersion;
     private final boolean recovered;
+    private List<BotSeat> bots = List.of();
+    private BotSettings botSettings = BotSettings.DEFAULT;
 
     PokerRoom(UUID id, String code, String name, String passwordHash, String hostUsername, TableConfig config) {
         this(id, code, name, passwordHash, hostUsername, config, new HoldemTable(config),
@@ -65,6 +69,13 @@ public final class PokerRoom {
     public boolean recovered() { return recovered; }
     public Instant actionDeadline() { return actionDeadline; }
     public long stateVersion() { return stateVersion; }
+    public List<BotSeat> bots() { return bots; }
+    public BotSettings botSettings() { return botSettings; }
+    public boolean isBot(String id) { return bots.stream().anyMatch(bot -> bot.id().equals(id)); }
+    public void installBots(List<BotSeat> bots, BotSettings settings) {
+        this.bots = List.copyOf(bots);
+        this.botSettings = settings;
+    }
 
     public void addMember(String username) { members.add(username); }
     public boolean hasMember(String username) { return members.contains(username); }

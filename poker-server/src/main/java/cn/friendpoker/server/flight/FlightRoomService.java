@@ -94,7 +94,7 @@ public class FlightRoomService {
 
     private RoomSummary summary(FlightRoom room) {
         return new RoomSummary(room.id(), GameType.FLIGHT, room.code(), room.name(), room.passwordHash() != null,
-                room.members().size(), 4, 0, 0, room.status(), room.recovered());
+                room.members().size() + room.bots().size(), 4, 0, 0, room.status(), room.recovered());
     }
 
     static void requireActive(FlightRoom room) {

@@ -3,6 +3,9 @@ export type Street = 'WAITING' | 'SHUFFLE_PENDING' | 'PREFLOP' | 'FLOP' | 'TURN'
 export type UserRole = 'ADMIN' | 'PLAYER'
 export type RoomStatus = 'ACTIVE' | 'CLOSED'
 export type GameType = 'POKER' | 'FLIGHT'
+export type BotSpeed = 'NORMAL' | 'FAST'
+export interface BotSeat { id: string; name: string; seat: number }
+export interface BotSettings { enabled: boolean; speed: BotSpeed }
 
 export interface UserView { username: string; displayName: string; role: UserRole; enabled: boolean }
 export interface Card { rank: string; suit: string }
@@ -52,6 +55,9 @@ export interface PokerRoomState {
   actionDeadline: string | null
   status: RoomStatus
   recovered: boolean
+  stateVersion?: number
+  bots: BotSeat[]
+  botSettings: BotSettings
 }
 export type FlightPhase = 'WAITING' | 'ROLL' | 'MOVE' | 'COMPLETE'
 export interface FlightBoardItem { id: number; type: string; cellIndex: number; spawnRound: number; expiresAtRound: number }
@@ -78,6 +84,9 @@ export interface FlightRoomState {
   game: FlightSnapshot
   status: RoomStatus
   recovered: boolean
+  stateVersion?: number
+  bots: BotSeat[]
+  botSettings: BotSettings
 }
 export type RoomState = PokerRoomState | FlightRoomState
 export interface RoomSummary {

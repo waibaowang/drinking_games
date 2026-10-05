@@ -3,9 +3,10 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId } from 'vue'
 import { Client } from '@stomp/stompjs'
 import { api } from '../api'
 import { shouldApplyRoomUpdate } from '../room-updates'
-import type { FlightPlayerSnapshot, FlightRoomState, UserView } from '../types'
+import type { FlightPlayerSnapshot, FlightRoomState, RoomState, UserView } from '../types'
 import FlightPlane from './FlightPlane.vue'
 import FlightDetails from './FlightDetails.vue'
+import BotControls from './BotControls.vue'
 import { CELL_SIZE, colors, colorNames, track, hangarCenters, homePoint, hangarPoint, piecePoint, globalCell } from '../flight-board'
 import '../flight.css'
 
@@ -16,6 +17,7 @@ const error = ref('')
 const connected = ref(false)
 const actionPending = ref(false)
 const requestPending = ref(false)
+const botPending = ref(false)
 const pendingVersion = ref<number | null>(null)
 const drawer = ref<'rules' | 'log' | 'chat' | null>(null)
 const drawerDialog = ref<HTMLDialogElement | null>(null)
@@ -34,7 +36,7 @@ let messageTimer = 0
 const me = computed(() => room.value.game.players.find(player => player.id === props.user.username))
 const seated = computed(() => !!me.value)
 const myTurn = computed(() => me.value?.seat === room.value.game.currentSeat)
-const busy = computed(() => actionPending.value || requestPending.value)
+const busy = computed(() => actionPending.value || requestPending.value || botPending.value)
 const canOperate = computed(() => connected.value && room.value.status === 'ACTIVE' && !busy.value)
 const betweenGames = computed(() => ['WAITING', 'COMPLETE'].includes(room.value.game.phase))
 const canStart = computed(() => props.user.username === room.value.hostUsername
@@ -57,6 +59,10 @@ const boardPieces = computed(() => room.value.game.players.flatMap(player => pla
 })))
 
 function playerAt(seat: number) { return room.value.game.players.find(player => player.seat === seat) }
+function isBot(id?: string) { return !!id && (room.value.bots ?? []).some(bot => bot.id === id) }
+function applyBotUpdate(incoming: RoomState) {
+  if (incoming.gameType === 'FLIGHT' && incoming.id === room.value.id) applyIncoming(incoming)
+}
 function isMovable(player: FlightPlayerSnapshot, piece: number) {
   return canOperate.value
     && player.id === props.user.username && myTurn.value && room.value.game.phase === 'MOVE'
@@ -126,7 +132,7 @@ async function refreshState(settlePending = false) {
   catch (cause) { showError(cause); return false }
 }
 function applyIncoming(incoming: FlightRoomState) {
-  if (!shouldApplyRoomUpdate(room.value.status, room.value.game.version, incoming.status, incoming.game.version)) return
+  if (!shouldApplyRoomUpdate(room.value.status, room.value.stateVersion ?? room.value.game.version, incoming.status, incoming.stateVersion ?? incoming.game.version)) return
   room.value = incoming
   if (incoming.status === 'CLOSED') closeDrawer()
   if (incoming.status === 'CLOSED' || (pendingVersion.value !== null && incoming.game.version > pendingVersion.value)) {
@@ -259,7 +265,7 @@ onBeforeUnmount(() => {
               </g>
             </svg>
             <div v-for="(center, seat) in hangarCenters" :key="`label-${seat}`" class="flight-airport-label" :class="[`seat-${seat}`, { current: room.game.currentSeat === seat, empty: !playerAt(seat) }]" :style="{ '--seat-color': colors[seat], left: `${center.x / 10}%`, top: seat === 0 || seat === 3 ? '4%' : '96%' }" :title="playerAt(seat)?.name">
-              <span class="flight-label-name">{{ playerAt(seat)?.id === user.username ? `${playerAt(seat)?.name}（我）` : playerAt(seat)?.name || colorNames[seat] }}</span><small>{{ playerAt(seat) ? `${completed(seat)}/4` : '空位' }}</small>
+              <span class="flight-label-name"><b v-if="isBot(playerAt(seat)?.id)" class="flight-bot-mark" aria-label="机器人">BOT</b>{{ playerAt(seat)?.id === user.username ? `${playerAt(seat)?.name}（我）` : playerAt(seat)?.name || colorNames[seat] }}</span><small>{{ playerAt(seat) ? `${completed(seat)}/4` : '空位' }}</small>
             </div>
           </div>
 
@@ -275,6 +281,7 @@ onBeforeUnmount(() => {
             <div v-else-if="!seated && betweenGames" class="flight-seat-options"><button v-for="seat in 4" :key="seat" class="flight-seat" :style="{ '--seat-color': colors[seat - 1] }" :disabled="!canSit(seat - 1)" @click="sit(seat - 1)">{{ colorNames[seat - 1] }}</button></div>
             <template v-else><button v-if="canStart" class="flight-primary" :disabled="!canOperate" @click="start">{{ requestPending ? '正在开始…' : room.game.gameNumber ? '开始下一局' : '开始游戏' }}</button><button v-if="seated && betweenGames" class="flight-secondary" :disabled="!canOperate" @click="stand">离开座位</button></template>
           </div>
+          <BotControls :room="room" :username="user.username" :connected="connected" :busy="busy" @pending="botPending = $event" @updated="applyBotUpdate" @error="showError" />
           <nav class="flight-tools" aria-label="飞行棋工具">
             <button @click="openDrawer('rules')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="3"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>规则</button><button @click="openDrawer('log')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>飞行记录</button><button @click="openDrawer('chat')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 15a3 3 0 0 1-3 3H9l-5 3V6a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3Z"/><path d="M8 8h8M8 12h5"/></svg>聊天</button>
           </nav>
@@ -294,3 +301,7 @@ onBeforeUnmount(() => {
     </div>
   </main>
 </template>
+
+<style scoped>
+.flight-bot-mark { display: inline-block; margin-right: 3px; padding: 0 2px; border: 1px solid #ffffffaa; border-radius: 3px; font-size: 8px; vertical-align: 1px; }
+</style>

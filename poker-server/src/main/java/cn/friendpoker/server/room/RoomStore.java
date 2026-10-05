@@ -5,6 +5,8 @@ import cn.friendpoker.domain.game.PlayerPersistenceState;
 import cn.friendpoker.domain.game.Street;
 import cn.friendpoker.domain.game.TableConfig;
 import cn.friendpoker.domain.game.TablePersistenceState;
+import cn.friendpoker.server.bot.BotSeat;
+import cn.friendpoker.server.bot.BotSettings;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 import org.springframework.dao.ConcurrencyFailureException;
@@ -44,7 +46,7 @@ public class RoomStore {
                     """, room.id().toString(), room.code(), room.name(), room.passwordHash(), room.hostUsername(),
                     room.config().smallBlind(), room.config().bigBlind(), room.config().initialStack(),
                     room.config().maxPlayers(), room.config().actionSeconds(), room.status().name(),
-                    serialize(new PersistedRoomState(room.table().exportState(), room.recentActionIds())),
+                    serialize(new PersistedRoomState(room.table().exportState(), room.recentActionIds(), room.bots(), room.botSettings())),
                     room.stateVersion(), null, Timestamp.from(room.createdAt()), Timestamp.from(room.createdAt()));
             jdbc.update("insert into room_members (room_id, username, joined_at) values (?, ?, ?)",
                     room.id().toString(), room.hostUsername(), Timestamp.from(room.createdAt()));
@@ -63,13 +65,18 @@ public class RoomStore {
 
     public long saveState(PokerRoom room, HoldemTable candidate, List<String> actionIds,
                           Instant deadline, RoomStatus status) {
+        return saveState(room, candidate, actionIds, deadline, status, room.bots(), room.botSettings());
+    }
+
+    public long saveState(PokerRoom room, HoldemTable candidate, List<String> actionIds,
+                          Instant deadline, RoomStatus status, List<BotSeat> bots, BotSettings settings) {
         Long next = transactions.execute(transaction -> {
             TablePersistenceState tableState = candidate.exportState();
             long nextVersion = room.stateVersion() + 1;
             int updated = jdbc.update("""
                     update poker_rooms set state_json = ?, state_version = ?, action_deadline = ?, status = ?, updated_at = ?
                     where id = ? and state_version = ?
-                    """, serialize(new PersistedRoomState(tableState, actionIds)), nextVersion,
+                    """, serialize(new PersistedRoomState(tableState, actionIds, bots, settings)), nextVersion,
                     deadline == null ? null : Timestamp.from(deadline), status.name(), Timestamp.from(Instant.now()),
                     room.id().toString(), room.stateVersion());
             if (updated != 1) throw new ConcurrencyFailureException("房间状态已被其他操作更新");
@@ -98,11 +105,13 @@ public class RoomStore {
         List<String> members = jdbc.queryForList(
                 "select username from room_members where room_id = ? order by joined_at", String.class, id.toString());
         Timestamp deadline = rs.getTimestamp("action_deadline");
-        return new PokerRoom(id, rs.getString("code"), rs.getString("name"), rs.getString("password_hash"),
+        PokerRoom room = new PokerRoom(id, rs.getString("code"), rs.getString("name"), rs.getString("password_hash"),
                 rs.getString("host_username"), config, HoldemTable.restore(config, saved.table()),
                 new LinkedHashSet<>(members), saved.recentActionIds(), rs.getTimestamp("created_at").toInstant(),
                 RoomStatus.valueOf(rs.getString("status")), deadline == null ? null : deadline.toInstant(),
                 rs.getLong("state_version"), true);
+        room.installBots(saved.bots(), saved.botSettings());
+        return room;
     }
 
     private void insertHistory(PokerRoom room, TablePersistenceState state) {
@@ -114,6 +123,7 @@ public class RoomStore {
                 Timestamp.from(Instant.now()), room.name());
         state.players().stream().filter(player -> player.holeCards().size() == 2)
                 .map(PlayerPersistenceState::id).distinct()
+                .filter(username -> !room.isBot(username))
                 .forEach(username -> jdbc.update(
                         "insert into hand_record_players (hand_id, username) values (?, ?)", handId, username));
     }

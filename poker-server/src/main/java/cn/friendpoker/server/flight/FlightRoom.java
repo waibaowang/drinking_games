@@ -1,6 +1,8 @@
 package cn.friendpoker.server.flight;
 
 import cn.friendpoker.domain.flight.FlightGame;
+import cn.friendpoker.server.bot.BotSeat;
+import cn.friendpoker.server.bot.BotSettings;
 import cn.friendpoker.server.room.RoomStatus;
 
 import java.time.Instant;
@@ -25,6 +27,8 @@ public final class FlightRoom {
     private RoomStatus status;
     private long stateVersion;
     private final boolean recovered;
+    private List<BotSeat> bots = List.of();
+    private BotSettings botSettings = BotSettings.DEFAULT;
 
     FlightRoom(UUID id, String code, String name, String passwordHash, String hostUsername) {
         this(id, code, name, passwordHash, hostUsername, new FlightGame(),
@@ -58,6 +62,13 @@ public final class FlightRoom {
     public RoomStatus status() { return status; }
     public long stateVersion() { return stateVersion; }
     public boolean recovered() { return recovered; }
+    public List<BotSeat> bots() { return bots; }
+    public BotSettings botSettings() { return botSettings; }
+    public boolean isBot(String id) { return bots.stream().anyMatch(bot -> bot.id().equals(id)); }
+    public void installBots(List<BotSeat> bots, BotSettings settings) {
+        this.bots = List.copyOf(bots);
+        this.botSettings = settings;
+    }
     public Set<String> members() { return Set.copyOf(members); }
     public boolean hasMember(String username) { return members.contains(username); }
     public void addMember(String username) { members.add(username); }

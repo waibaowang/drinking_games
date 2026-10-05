@@ -6,6 +6,10 @@ import cn.friendpoker.domain.game.HoldemTable;
 import cn.friendpoker.domain.game.PlayerSnapshot;
 import cn.friendpoker.domain.game.Street;
 import cn.friendpoker.domain.game.TableSnapshot;
+import cn.friendpoker.domain.game.PokerBotPolicy;
+import cn.friendpoker.server.bot.BotSeat;
+import cn.friendpoker.server.bot.BotSettings;
+import cn.friendpoker.server.bot.BotScheduler;
 import cn.friendpoker.server.user.UserAccountRepository;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
@@ -18,6 +22,8 @@ import org.springframework.stereotype.Service;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.ArrayList;
+import java.util.random.RandomGenerator;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -33,6 +39,7 @@ public class GameCoordinator {
     private final RoomService rooms;
     private final SimpMessagingTemplate messaging;
     private final UserAccountRepository users;
+    private final BotScheduler bots;
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2, runnable -> {
         Thread thread = new Thread(runnable, "poker-action-timer");
         thread.setDaemon(true);
@@ -41,10 +48,11 @@ public class GameCoordinator {
     private final Map<UUID, TimerState> timers = new ConcurrentHashMap<>();
     private final java.util.Set<UUID> pendingDeals = ConcurrentHashMap.newKeySet();
 
-    public GameCoordinator(RoomService rooms, SimpMessagingTemplate messaging, UserAccountRepository users) {
+    public GameCoordinator(RoomService rooms, SimpMessagingTemplate messaging, UserAccountRepository users, BotScheduler bots) {
         this.rooms = rooms;
         this.messaging = messaging;
         this.users = users;
+        this.bots = bots;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -87,6 +95,9 @@ public class GameCoordinator {
             RoomService.requireActive(room);
             if (!room.hostUsername().equals(username)) throw new IllegalArgumentException("只有房主可以开始下一手牌");
             HoldemTable candidate = cloneTable(room);
+            if (!room.bots().isEmpty() && candidate.snapshotFor("").players().stream().noneMatch(p -> !room.isBot(p.id()) && p.stack() > 0)) {
+                throw new IllegalArgumentException("含机器人的房间至少需要一名有筹码的真人入座");
+            }
             candidate.prepareHand();
             install(room, candidate, room.recentActionIds(), null, RoomStatus.ACTIVE);
             preparedVersion = candidate.snapshotFor("").version();
@@ -177,7 +188,8 @@ public class GameCoordinator {
     }
 
     private Instant nextDeadline(PokerRoom room, HoldemTable candidate) {
-        return candidate.snapshotFor("").actorSeat() == null
+        TableSnapshot view = candidate.snapshotFor("");
+        return view.actorSeat() == null || view.players().stream().anyMatch(p -> p.seat() == view.actorSeat() && room.isBot(p.id()))
                 ? null : Instant.now().plusSeconds(room.config().actionSeconds());
     }
 
@@ -219,6 +231,7 @@ public class GameCoordinator {
         cancelTimer(room.id());
         TableSnapshot snapshot = room.table().snapshotFor("");
         if (room.status() != RoomStatus.ACTIVE || snapshot.actorSeat() == null || room.actionDeadline() == null) return;
+        if (snapshot.players().stream().anyMatch(p -> p.seat() == snapshot.actorSeat() && room.isBot(p.id()))) return;
         long delay = Math.max(0, Duration.between(Instant.now(), room.actionDeadline()).toMillis());
         TimerState timer = new TimerState(snapshot.version(), room.actionDeadline());
         timers.put(room.id(), timer);
@@ -240,6 +253,7 @@ public class GameCoordinator {
                 if (snapshot.version() != expectedVersion || snapshot.actorSeat() == null) return;
                 PlayerSnapshot actor = snapshot.players().stream()
                         .filter(player -> player.seat() == snapshot.actorSeat()).findFirst().orElseThrow();
+                if (room.isBot(actor.id())) return;
                 ActionType fallback = room.table().snapshotFor(actor.id()).legalActions().contains(ActionType.CHECK)
                         ? ActionType.CHECK : ActionType.FOLD;
                 HoldemTable candidate = cloneTable(room);
@@ -273,6 +287,7 @@ public class GameCoordinator {
     private void broadcast(PokerRoom room) {
         activeMembers(room).forEach(member -> messaging.convertAndSendToUser(member,
                 "/queue/rooms/" + room.id(), toState(room, member)));
+        scheduleBot(room);
     }
 
     private void announceCommitment(PokerRoom room) {
@@ -288,8 +303,110 @@ public class GameCoordinator {
     }
 
     private RoomState toState(PokerRoom room, String viewer) {
-        return new RoomState(room.id(), GameType.POKER, room.code(), room.name(), room.hostUsername(), room.config(),
-                room.table().snapshotFor(viewer), room.actionDeadline(), room.status(), room.recovered());
+        synchronized (room) {
+            return new RoomState(room.id(), GameType.POKER, room.code(), room.name(), room.hostUsername(), room.config(),
+                    room.table().snapshotFor(viewer), room.actionDeadline(), room.status(), room.recovered(), room.bots(), room.botSettings(), room.stateVersion());
+        }
+    }
+
+    public void addBots(UUID id, String host, Integer seat) {
+        PokerRoom room = hostRoom(id, host);
+        synchronized (room) {
+            HoldemTable candidate = cloneTable(room);
+            if (candidate.snapshotFor("").players().stream().noneMatch(p -> !room.isBot(p.id()) && p.stack() > 0)) {
+                throw new IllegalArgumentException("请先选择座位，再添加机器人");
+            }
+            List<BotSeat> roster = new ArrayList<>(room.bots());
+            for (int index = 0; index < room.config().maxPlayers(); index++) {
+                final int target = index;
+                if ((seat == null || seat == index) && candidate.snapshotFor("").players().stream().noneMatch(p -> p.seat() == target)) {
+                    BotSeat bot = new BotSeat("bot:" + UUID.randomUUID(), "机器人 " + (index + 1), index);
+                    candidate.sitDown(bot.id(), bot.name(), index, room.config().initialStack());
+                    roster.add(bot);
+                }
+            }
+            if (roster.size() == room.bots().size()) throw new IllegalArgumentException("没有可用空位");
+            saveBots(room, candidate, roster, room.botSettings());
+        }
+        broadcast(room);
+    }
+
+    public void removeBot(UUID id, String host, String botId) {
+        PokerRoom room = hostRoom(id, host);
+        synchronized (room) {
+            if (!room.isBot(botId)) throw new IllegalArgumentException("机器人不存在");
+            HoldemTable candidate = cloneTable(room);
+            candidate.standUp(botId);
+            saveBots(room, candidate, room.bots().stream().filter(bot -> !bot.id().equals(botId)).toList(), room.botSettings());
+        }
+        broadcast(room);
+    }
+
+    public void botSettings(UUID id, String host, Boolean enabled, BotSettings.Speed speed) {
+        PokerRoom room = hostRoom(id, host);
+        synchronized (room) {
+            BotSettings next = new BotSettings(enabled == null ? room.botSettings().enabled() : enabled,
+                    speed == null ? room.botSettings().speed() : speed);
+            saveBots(room, cloneTable(room), room.bots(), next);
+        }
+        broadcast(room);
+    }
+
+    private PokerRoom hostRoom(UUID id, String host) {
+        PokerRoom room = rooms.requireMember(id, host);
+        if (!room.hostUsername().equals(host)) throw new IllegalArgumentException("只有房主可以管理机器人");
+        return room;
+    }
+
+    private void saveBots(PokerRoom room, HoldemTable candidate, List<BotSeat> roster, BotSettings settings) {
+        RoomService.requireActive(room);
+        long version = rooms.store().saveState(room, candidate, room.recentActionIds(), room.actionDeadline(), RoomStatus.ACTIVE, roster, settings);
+        room.install(candidate, room.recentActionIds(), room.actionDeadline(), RoomStatus.ACTIVE, version);
+        room.installBots(roster, settings);
+    }
+
+    public void resumeBots(UUID id) { rooms.find(id).ifPresent(this::scheduleBot); }
+
+    private void scheduleBot(PokerRoom room) {
+        synchronized (room) {
+            TableSnapshot view = room.table().snapshotFor("");
+            BotSeat actor = room.bots().stream().filter(bot -> Integer.valueOf(bot.seat()).equals(view.actorSeat())).findFirst().orElse(null);
+            if (room.status() != RoomStatus.ACTIVE || !room.botSettings().enabled() || !bots.hasHuman(room.id())
+                    || actor == null || view.street() == Street.SHUFFLE_PENDING || view.street() == Street.COMPLETE) {
+                bots.cancel(room.id());
+                return;
+            }
+            long version = room.stateVersion();
+            String actionId = UUID.randomUUID().toString();
+            bots.schedule(room.id(), version, room.botSettings().delayMillis(), () -> botStep(room.id(), version, actor.id(), actionId, 0));
+        }
+    }
+
+    public void botStep(UUID id, long expectedRoomVersion, String actorId, String actionId, int attempt) {
+        PokerRoom room = rooms.get(id);
+        try {
+            synchronized (room) {
+                if (room.stateVersion() != expectedRoomVersion || room.status() != RoomStatus.ACTIVE
+                        || !room.botSettings().enabled() || !bots.hasHuman(id) || !room.isBot(actorId)
+                        || room.hasActionId(actionId)) return;
+                HoldemTable candidate = cloneTable(room);
+                TableSnapshot view = candidate.snapshotFor(actorId);
+                if (view.players().stream().noneMatch(p -> p.id().equals(actorId) && Integer.valueOf(p.seat()).equals(view.actorSeat()))) return;
+                var choice = PokerBotPolicy.choose(view, actorId, room.config().bigBlind(), RandomGenerator.getDefault());
+                candidate.act(actorId, choice.action(), choice.amount(), view.version());
+                install(room, candidate, room.actionIdsWith(actionId), nextDeadline(room, candidate), RoomStatus.ACTIVE);
+                log.info("room={} hand={} user={} actionId={} operation=BOT_{} accepted", id, view.handNumber(), actorId, actionId, choice.action());
+            }
+            scheduleTimeout(room);
+            broadcast(room);
+        } catch (RuntimeException exception) {
+            log.error("room={} user={} actionId={} operation=BOT_POKER failed attempt={}", id, actorId, actionId, attempt, exception);
+            synchronized (room) {
+                if (attempt < 2 && room.stateVersion() == expectedRoomVersion && room.status() == RoomStatus.ACTIVE) {
+                    bots.schedule(id, expectedRoomVersion, 2000, () -> botStep(id, expectedRoomVersion, actorId, actionId, attempt + 1));
+                }
+            }
+        }
     }
 
     private static final class TimerState {
